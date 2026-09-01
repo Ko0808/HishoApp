@@ -16,6 +16,10 @@ Phase 1 capture foundation:
 - automatic `Auto Captured Tasks` list creation
 - idempotent Google Tasks synchronization with retry
 - encrypted access-token storage and payload scrubbing after sync
+- recall-oriented local task candidate classification
+- Japanese deadline parsing for relative dates, weekdays, and common date/time formats
+- local effort, priority, and task-category estimation
+- conservative filtering of clearly promotional notifications
 - privacy-preserving diagnostics screen
 
 The development OAuth client is registered for package `app.hisho` and the current debug signing certificate.

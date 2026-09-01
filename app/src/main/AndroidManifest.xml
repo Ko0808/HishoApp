@@ -17,6 +17,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".MetadataActivity"
+            android:exported="false"
+            android:label="タスク推定の修正" />
+
         <service
             android:name=".capture.HishoNotificationListener"
             android:exported="false"
@@ -28,4 +33,3 @@
         </service>
     </application>
 </manifest>
-

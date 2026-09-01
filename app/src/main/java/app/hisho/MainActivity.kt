@@ -92,6 +92,10 @@ class MainActivity : Activity() {
             text = "通知本文はAndroid Keystoreの鍵で暗号化され、画面やログには表示しません。Google接続後、同期成功時に削除します。"
             setPadding(0, 12.dp, 0, 0)
         })
+        root.addView(Button(this).apply {
+            text = "タスク推定を確認・修正"
+            setOnClickListener { startActivity(Intent(this@MainActivity, MetadataActivity::class.java)) }
+        }, matchWidth())
         return ScrollView(this).apply { addView(root) }
     }
 
@@ -101,7 +105,10 @@ class MainActivity : Activity() {
         status.setTextColor(if (enabled) Color.rgb(28, 112, 76) else Color.rgb(168, 62, 48))
 
         val stats = CaptureQueueDatabase(this).stats()
-        metrics.text = "同期待ち ${stats.pending}件  •  重複除外 ${stats.duplicates}件  •  失敗 ${stats.failed}件"
+        metrics.text = buildString {
+            append("同期待ち ${stats.pending}件  •  重複除外 ${stats.duplicates}件")
+            append("\n広告除外 ${stats.ignored}件  •  失敗 ${stats.failed}件")
+        }
         googleStatus.text = if (EncryptedAuthStore(this).isConnected()) {
             "接続済み — Auto Captured Tasksへ同期します"
         } else {
