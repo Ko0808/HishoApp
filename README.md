@@ -20,6 +20,10 @@ Phase 1 capture foundation:
 - Japanese deadline parsing for relative dates, weekdays, and common date/time formats
 - local effort, priority, and task-category estimation
 - conservative filtering of clearly promotional notifications
+- concise, local action-title generation with full source text retained in task notes
+- Calendar FreeBusy scheduling within the configured 08:00–24:00 window
+- deterministic XS/S/M/L/XL duration allocation
+- idempotent Calendar event creation linked to each Google Task
 - privacy-preserving diagnostics screen
 
 The development OAuth client is registered for package `app.hisho` and the current debug signing certificate.

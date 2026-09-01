@@ -13,7 +13,7 @@ class GoogleTasksTokenProvider(private val context: Context) {
     /** Returns null only when fresh user interaction is required. */
     suspend fun accessToken(): String? = suspendCoroutine { continuation ->
         val request = AuthorizationRequest.builder()
-            .setRequestedScopes(listOf(Scope(GoogleTasksAuthorization.TASKS_SCOPE)))
+            .setRequestedScopes(GoogleTasksAuthorization.REQUIRED_SCOPES.map(::Scope))
             .build()
 
         Identity.getAuthorizationClient(context)
@@ -39,4 +39,3 @@ class GoogleTasksTokenProvider(private val context: Context) {
             }
     }
 }
-

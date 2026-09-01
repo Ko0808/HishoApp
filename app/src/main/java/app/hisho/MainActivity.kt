@@ -107,7 +107,7 @@ class MainActivity : Activity() {
         val stats = CaptureQueueDatabase(this).stats()
         metrics.text = buildString {
             append("同期待ち ${stats.pending}件  •  重複除外 ${stats.duplicates}件")
-            append("\n広告除外 ${stats.ignored}件  •  失敗 ${stats.failed}件")
+            append("\n時間配置 ${stats.scheduled}件  •  広告除外 ${stats.ignored}件  •  失敗 ${stats.failed}件")
         }
         googleStatus.text = if (EncryptedAuthStore(this).isConnected()) {
             "接続済み — Auto Captured Tasksへ同期します"

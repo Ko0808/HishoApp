@@ -17,7 +17,7 @@ class GoogleTasksAuthorization(private val activity: Activity) {
 
     fun authorize(callback: Callback) {
         val request = AuthorizationRequest.builder()
-            .setRequestedScopes(listOf(Scope(TASKS_SCOPE)))
+            .setRequestedScopes(REQUIRED_SCOPES.map(::Scope))
             .build()
 
         Identity.getAuthorizationClient(activity)
@@ -49,6 +49,9 @@ class GoogleTasksAuthorization(private val activity: Activity) {
 
     companion object {
         const val TASKS_SCOPE = "https://www.googleapis.com/auth/tasks"
+        const val CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+        const val CALENDAR_FREEBUSY_SCOPE = "https://www.googleapis.com/auth/calendar.events.freebusy"
+        val REQUIRED_SCOPES = listOf(TASKS_SCOPE, CALENDAR_EVENTS_SCOPE, CALENDAR_FREEBUSY_SCOPE)
         const val REQUEST_CODE = 4107
     }
 }

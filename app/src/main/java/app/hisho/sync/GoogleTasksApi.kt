@@ -9,6 +9,7 @@ import java.net.URL
 
 class GoogleTasksApi(private val accessToken: String) {
     data class CreatedTask(val id: String)
+    data class ExistingTask(val id: String, val title: String)
 
     class HttpFailure(val status: Int, message: String) : IOException(message)
 
@@ -59,6 +60,22 @@ class GoogleTasksApi(private val accessToken: String) {
             task,
         )
         return CreatedTask(response.getString("id"))
+    }
+
+    fun getTask(taskListId: String, taskId: String): ExistingTask {
+        val response = request(
+            "GET",
+            "/tasks/v1/lists/${Uri.encode(taskListId)}/tasks/${Uri.encode(taskId)}",
+        )
+        return ExistingTask(response.getString("id"), response.optString("title", "タスクを実行する"))
+    }
+
+    fun updateTaskTitle(taskListId: String, taskId: String, title: String) {
+        request(
+            "PATCH",
+            "/tasks/v1/lists/${Uri.encode(taskListId)}/tasks/${Uri.encode(taskId)}",
+            JSONObject().put("title", title),
+        )
     }
 
     private fun request(method: String, path: String, body: JSONObject? = null): JSONObject {

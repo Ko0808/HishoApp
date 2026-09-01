@@ -12,14 +12,28 @@ import app.hisho.intelligence.LocalTaskProcessor
 class CaptureQueueDatabase(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
-    data class QueueStats(val pending: Int, val duplicates: Int, val failed: Int, val ignored: Int)
+    data class QueueStats(
+        val pending: Int,
+        val duplicates: Int,
+        val failed: Int,
+        val ignored: Int,
+        val scheduled: Int,
+    )
     data class PendingCapture(
         val id: Long,
         val dedupKey: String,
         val sourcePackage: String,
         val deadlineEpochMillis: Long?,
+        val effortMinutes: Int,
         val title: String,
         val body: String,
+    )
+    data class UnscheduledCapture(
+        val id: Long,
+        val dedupKey: String,
+        val googleTaskId: String,
+        val deadlineEpochMillis: Long?,
+        val effortMinutes: Int,
     )
     data class MetadataItem(
         val id: Long,
@@ -58,7 +72,10 @@ class CaptureQueueDatabase(context: Context) :
                 priority TEXT NOT NULL DEFAULT 'NORMAL',
                 category TEXT NOT NULL DEFAULT 'OTHER',
                 is_candidate INTEGER NOT NULL DEFAULT 1,
-                candidate_reason TEXT NOT NULL DEFAULT 'legacy'
+                candidate_reason TEXT NOT NULL DEFAULT 'legacy',
+                scheduled_start INTEGER,
+                scheduled_end INTEGER,
+                calendar_event_id TEXT
             )
             """.trimIndent(),
         )
@@ -85,6 +102,11 @@ class CaptureQueueDatabase(context: Context) :
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN category TEXT NOT NULL DEFAULT 'OTHER'")
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN is_candidate INTEGER NOT NULL DEFAULT 1")
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN candidate_reason TEXT NOT NULL DEFAULT 'legacy'")
+        }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN scheduled_start INTEGER")
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN scheduled_end INTEGER")
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN calendar_event_id TEXT")
         }
     }
 
@@ -207,6 +229,7 @@ class CaptureQueueDatabase(context: Context) :
         duplicates = metric("duplicates"),
         failed = count("state = 'FAILED'"),
         ignored = count("state = 'IGNORED'"),
+        scheduled = count("calendar_event_id IS NOT NULL"),
     )
 
     fun pending(limit: Int = 20): List<PendingCapture> {
@@ -214,7 +237,7 @@ class CaptureQueueDatabase(context: Context) :
         return readableDatabase.query(
             "capture_queue",
             arrayOf(
-                "id", "dedup_key", "source_package", "deadline",
+                "id", "dedup_key", "source_package", "deadline", "effort",
                 "title_cipher", "title_nonce", "body_cipher", "body_nonce",
             ),
             "state IN ('PENDING','RETRY')",
@@ -227,10 +250,10 @@ class CaptureQueueDatabase(context: Context) :
             buildList {
                 while (cursor.moveToNext()) {
                     val title = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(4), cursor.getBlob(5)),
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(5), cursor.getBlob(6)),
                     )
                     val body = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(6), cursor.getBlob(7)),
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(7), cursor.getBlob(8)),
                     )
                     add(
                         PendingCapture(
@@ -238,11 +261,37 @@ class CaptureQueueDatabase(context: Context) :
                             dedupKey = cursor.getString(1),
                             sourcePackage = cursor.getString(2),
                             deadlineEpochMillis = if (cursor.isNull(3)) null else cursor.getLong(3),
+                            effortMinutes = effortMinutes(cursor.getString(4)),
                             title = title,
                             body = body,
                         ),
                     )
                 }
+            }
+        }
+    }
+
+    fun unscheduled(limit: Int = 20): List<UnscheduledCapture> = readableDatabase.query(
+        "capture_queue",
+        arrayOf("id", "dedup_key", "google_task_id", "deadline", "effort"),
+        "state = 'SYNCED' AND google_task_id IS NOT NULL AND calendar_event_id IS NULL",
+        null,
+        null,
+        null,
+        "created_at ASC",
+        limit.toString(),
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(
+                    UnscheduledCapture(
+                        id = cursor.getLong(0),
+                        dedupKey = cursor.getString(1),
+                        googleTaskId = cursor.getString(2),
+                        deadlineEpochMillis = if (cursor.isNull(3)) null else cursor.getLong(3),
+                        effortMinutes = effortMinutes(cursor.getString(4)),
+                    ),
+                )
             }
         }
     }
@@ -256,6 +305,31 @@ class CaptureQueueDatabase(context: Context) :
             put("body_cipher", ByteArray(0))
             put("body_nonce", ByteArray(0))
             putNull("last_error_code")
+        }
+        writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun markScheduled(
+        id: Long,
+        googleTaskId: String,
+        calendarEventId: String,
+        scheduledStart: Long,
+        scheduledEnd: Long,
+        scrubPayload: Boolean,
+    ) {
+        val values = ContentValues().apply {
+            put("state", "SYNCED")
+            put("google_task_id", googleTaskId)
+            put("calendar_event_id", calendarEventId)
+            put("scheduled_start", scheduledStart)
+            put("scheduled_end", scheduledEnd)
+            putNull("last_error_code")
+            if (scrubPayload) {
+                put("title_cipher", ByteArray(0))
+                put("title_nonce", ByteArray(0))
+                put("body_cipher", ByteArray(0))
+                put("body_nonce", ByteArray(0))
+            }
         }
         writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
     }
@@ -291,9 +365,17 @@ class CaptureQueueDatabase(context: Context) :
         arrayOf(name),
     ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
 
+    private fun effortMinutes(effort: String): Int = when (effort) {
+        "XS" -> 10
+        "M" -> 60
+        "L" -> 120
+        "XL" -> 240
+        else -> 25
+    }
+
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
     }
 }
