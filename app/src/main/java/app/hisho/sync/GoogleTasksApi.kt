@@ -50,11 +50,13 @@ class GoogleTasksApi(private val accessToken: String) {
         return null
     }
 
-    fun createTask(taskListId: String, title: String, notes: String): CreatedTask {
+    fun createTask(taskListId: String, title: String, notes: String, due: String?): CreatedTask {
+        val task = JSONObject().put("title", title).put("notes", notes)
+        due?.let { task.put("due", it) }
         val response = request(
             "POST",
             "/tasks/v1/lists/${Uri.encode(taskListId)}/tasks",
-            JSONObject().put("title", title).put("notes", notes),
+            task,
         )
         return CreatedTask(response.getString("id"))
     }

@@ -6,6 +6,7 @@ import androidx.work.WorkerParameters
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.data.CaptureQueueDatabase
 import java.io.IOException
+import java.time.Instant
 
 /**
  * Durable seam for Phase 1 Google Tasks synchronization.
@@ -59,6 +60,7 @@ class CaptureSyncWorker(
                     append("Captured from ${capture.sourcePackage}\n")
                     append(marker)
                 },
+                due = capture.deadlineEpochMillis?.let { Instant.ofEpochMilli(it).toString() },
             )
             database.markSynced(capture.id, task.id)
         } catch (error: Exception) {

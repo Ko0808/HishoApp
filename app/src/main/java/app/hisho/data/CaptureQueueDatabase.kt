@@ -17,6 +17,7 @@ class CaptureQueueDatabase(context: Context) :
         val id: Long,
         val dedupKey: String,
         val sourcePackage: String,
+        val deadlineEpochMillis: Long?,
         val title: String,
         val body: String,
     )
@@ -213,7 +214,7 @@ class CaptureQueueDatabase(context: Context) :
         return readableDatabase.query(
             "capture_queue",
             arrayOf(
-                "id", "dedup_key", "source_package",
+                "id", "dedup_key", "source_package", "deadline",
                 "title_cipher", "title_nonce", "body_cipher", "body_nonce",
             ),
             "state IN ('PENDING','RETRY')",
@@ -226,16 +227,17 @@ class CaptureQueueDatabase(context: Context) :
             buildList {
                 while (cursor.moveToNext()) {
                     val title = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(3), cursor.getBlob(4)),
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(4), cursor.getBlob(5)),
                     )
                     val body = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(5), cursor.getBlob(6)),
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(6), cursor.getBlob(7)),
                     )
                     add(
                         PendingCapture(
                             id = cursor.getLong(0),
                             dedupKey = cursor.getString(1),
                             sourcePackage = cursor.getString(2),
+                            deadlineEpochMillis = if (cursor.isNull(3)) null else cursor.getLong(3),
                             title = title,
                             body = body,
                         ),
