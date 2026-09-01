@@ -12,6 +12,13 @@ class CaptureQueueDatabase(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     data class QueueStats(val pending: Int, val duplicates: Int, val failed: Int)
+    data class PendingCapture(
+        val id: Long,
+        val dedupKey: String,
+        val sourcePackage: String,
+        val title: String,
+        val body: String,
+    )
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -31,7 +38,8 @@ class CaptureQueueDatabase(context: Context) :
                 state TEXT NOT NULL DEFAULT 'PENDING',
                 attempts INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL,
-                last_error_code TEXT
+                last_error_code TEXT,
+                google_task_id TEXT
             )
             """.trimIndent(),
         )
@@ -46,7 +54,11 @@ class CaptureQueueDatabase(context: Context) :
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN google_task_id TEXT")
+        }
+    }
 
     fun enqueue(notification: NormalizedNotification): Boolean {
         val crypto = EncryptedPayloadStore()
@@ -81,6 +93,67 @@ class CaptureQueueDatabase(context: Context) :
         failed = count("state = 'FAILED'"),
     )
 
+    fun pending(limit: Int = 20): List<PendingCapture> {
+        val crypto = EncryptedPayloadStore()
+        return readableDatabase.query(
+            "capture_queue",
+            arrayOf(
+                "id", "dedup_key", "source_package",
+                "title_cipher", "title_nonce", "body_cipher", "body_nonce",
+            ),
+            "state IN ('PENDING','RETRY')",
+            null,
+            null,
+            null,
+            "created_at ASC",
+            limit.toString(),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    val title = crypto.decrypt(
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(3), cursor.getBlob(4)),
+                    )
+                    val body = crypto.decrypt(
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(5), cursor.getBlob(6)),
+                    )
+                    add(
+                        PendingCapture(
+                            id = cursor.getLong(0),
+                            dedupKey = cursor.getString(1),
+                            sourcePackage = cursor.getString(2),
+                            title = title,
+                            body = body,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun markSynced(id: Long, googleTaskId: String) {
+        val values = ContentValues().apply {
+            put("state", "SYNCED")
+            put("google_task_id", googleTaskId)
+            put("title_cipher", ByteArray(0))
+            put("title_nonce", ByteArray(0))
+            put("body_cipher", ByteArray(0))
+            put("body_nonce", ByteArray(0))
+            putNull("last_error_code")
+        }
+        writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun markRetry(id: Long, errorCode: String) {
+        writableDatabase.execSQL(
+            """
+            UPDATE capture_queue
+            SET state = 'RETRY', attempts = attempts + 1, last_error_code = ?
+            WHERE id = ?
+            """.trimIndent(),
+            arrayOf<Any?>(errorCode.take(64), id),
+        )
+    }
+
     private fun count(where: String): Int = readableDatabase.rawQuery(
         "SELECT COUNT(*) FROM capture_queue WHERE $where",
         null,
@@ -103,7 +176,6 @@ class CaptureQueueDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 1
+        const val DATABASE_VERSION = 2
     }
 }
-

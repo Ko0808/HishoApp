@@ -12,10 +12,13 @@ Phase 1 capture foundation:
 - SHA-256/time-window deduplication
 - AES-GCM payload encryption backed by Android Keystore
 - durable SQLite retry queue
-- WorkManager synchronization seam
+- Google Play services AuthorizationClient integration
+- automatic `Auto Captured Tasks` list creation
+- idempotent Google Tasks synchronization with retry
+- encrypted access-token storage and payload scrubbing after sync
 - privacy-preserving diagnostics screen
 
-Google OAuth and Tasks synchronization are intentionally the next increment because they require an Android OAuth client configured for the final application id and signing certificate.
+The development OAuth client is registered for package `app.hisho` and the current debug signing certificate.
 
 ## Build
 
