@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import app.hisho.auth.EncryptedAuthStore
+import app.hisho.auth.GoogleTasksTokenProvider
 import app.hisho.data.CaptureQueueDatabase
 import java.io.IOException
 import java.time.Instant
@@ -18,7 +19,11 @@ class CaptureSyncWorker(
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val authStore = EncryptedAuthStore(applicationContext)
-        val token = authStore.accessToken() ?: return Result.success()
+        val token = try {
+            GoogleTasksTokenProvider(applicationContext).accessToken()
+        } catch (_: IOException) {
+            return Result.retry()
+        } ?: return Result.success()
         val database = CaptureQueueDatabase(applicationContext)
         val api = GoogleTasksApi(token)
 
@@ -31,7 +36,7 @@ class CaptureSyncWorker(
         } catch (error: GoogleTasksApi.HttpFailure) {
             if (error.status == 401) {
                 authStore.clear()
-                Result.success()
+                Result.retry()
             } else {
                 Result.retry()
             }
