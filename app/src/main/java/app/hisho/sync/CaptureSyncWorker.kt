@@ -8,6 +8,7 @@ import app.hisho.auth.GoogleTasksTokenProvider
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.intelligence.ActionTitleGenerator
 import app.hisho.scheduling.DeterministicScheduler
+import app.hisho.scheduling.SchedulingPreferences
 import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
@@ -31,7 +32,7 @@ class CaptureSyncWorker(
         val database = CaptureQueueDatabase(applicationContext)
         val tasksApi = GoogleTasksApi(token)
         val calendarApi = GoogleCalendarApi(token)
-        val scheduler = DeterministicScheduler()
+        val scheduler = SchedulingPreferences(applicationContext).scheduler()
 
         return try {
             val taskListId = tasksApi.findOrCreateTaskList(TASK_LIST_TITLE)
@@ -71,7 +72,9 @@ class CaptureSyncWorker(
     ) {
         val marker = "Hisho capture: ${capture.dedupKey}"
         try {
-            val conciseTitle = ActionTitleGenerator.generate(capture.title, capture.body)
+            val conciseTitle = capture.actionTitle.ifBlank {
+                ActionTitleGenerator.generate(capture.title, capture.body)
+            }
             val existing = tasksApi.findTaskByMarker(taskListId, marker)
             val task = existing ?: tasksApi.createTask(
                 taskListId = taskListId,

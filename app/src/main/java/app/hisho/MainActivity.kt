@@ -23,12 +23,14 @@ import app.hisho.capture.CapturePreferences
 import app.hisho.capture.HishoNotificationListener
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.sync.CaptureSyncWorker
+import app.hisho.scheduling.SchedulingPreferences
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var metrics: TextView
     private lateinit var googleStatus: TextView
     private lateinit var authorization: GoogleTasksAuthorization
+    private lateinit var schedulingSummary: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,7 +98,41 @@ class MainActivity : Activity() {
             text = "タスク推定を確認・修正"
             setOnClickListener { startActivity(Intent(this@MainActivity, MetadataActivity::class.java)) }
         }, matchWidth())
+
+        root.addView(section("自動スケジュール"))
+        val scheduling = SchedulingPreferences(this)
+        schedulingSummary = TextView(this).apply { textSize = 16f }
+        root.addView(schedulingSummary)
+        root.addView(Button(this).apply {
+            text = "稼働時間を変更"
+            setOnClickListener {
+                scheduling.cycleWorkHours()
+                renderSchedulingSettings(scheduling)
+            }
+        }, matchWidth())
+        root.addView(Button(this).apply {
+            text = "予定間の余白を変更"
+            setOnClickListener {
+                scheduling.cycleBuffer()
+                renderSchedulingSettings(scheduling)
+            }
+        }, matchWidth())
+        root.addView(Button(this).apply {
+            text = "1日の上限を変更"
+            setOnClickListener {
+                scheduling.cycleDailyCapacity()
+                renderSchedulingSettings(scheduling)
+            }
+        }, matchWidth())
+        renderSchedulingSettings(scheduling)
         return ScrollView(this).apply { addView(root) }
+    }
+
+    private fun renderSchedulingSettings(settings: SchedulingPreferences) {
+        schedulingSummary.text =
+            "稼働 ${settings.workdayStartHour}:00〜${settings.workdayEndHour}:00" +
+                "  •  余白 ${settings.bufferMinutes}分" +
+                "\n1日の予定上限 ${settings.dailyCapacityMinutes / 60}時間"
     }
 
     private fun renderStatus() {

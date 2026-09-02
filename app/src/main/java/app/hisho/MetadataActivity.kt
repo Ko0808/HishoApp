@@ -8,6 +8,8 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.EditText
+import android.app.AlertDialog
 import android.widget.Toast
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -61,7 +63,17 @@ class MetadataActivity : Activity() {
             card.addView(TextView(this).apply {
                 text = "${item.category} / ${item.priority} / ${item.deadlineType}\n判定: ${item.reason}"
             })
+            card.addView(TextView(this).apply {
+                text = item.actionTitle.ifBlank { "（旧データ：タイトル未保存）" }
+                textSize = 18f
+                setPadding(0, 8.dp, 0, 4.dp)
+            })
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            actions.addView(Button(this).apply {
+                text = "名前を編集"
+                isEnabled = item.state !in setOf("SYNCED", "FAILED") && item.actionTitle.isNotBlank()
+                setOnClickListener { showTitleEditor(item.id, item.actionTitle) }
+            })
             actions.addView(Button(this).apply {
                 text = "工数 ${item.effort}"
                 setOnClickListener {
@@ -84,6 +96,24 @@ class MetadataActivity : Activity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = 12.dp })
         }
+    }
+
+    private fun showTitleEditor(id: Long, currentTitle: String) {
+        val input = EditText(this).apply {
+            setText(currentTitle)
+            setSelection(text.length)
+            maxLines = 2
+        }
+        AlertDialog.Builder(this)
+            .setTitle("タスク名を編集")
+            .setView(input)
+            .setNegativeButton("キャンセル", null)
+            .setPositiveButton("保存") { _, _ ->
+                database.updateActionTitle(id, input.text.toString())
+                enqueueSync()
+                render()
+            }
+            .show()
     }
 
     private fun enqueueSync() {

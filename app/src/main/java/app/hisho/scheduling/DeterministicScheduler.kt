@@ -9,8 +9,10 @@ import java.time.temporal.ChronoUnit
 
 class DeterministicScheduler(
     private val zoneId: ZoneId = ZoneId.systemDefault(),
-    private val allowedStart: LocalTime = LocalTime.of(8, 0),
-    private val allowedEnd: LocalTime = LocalTime.MIDNIGHT,
+    private val allowedStart: LocalTime = LocalTime.of(9, 0),
+    private val allowedEnd: LocalTime = LocalTime.of(18, 0),
+    private val bufferMinutes: Int = 10,
+    private val dailyCapacityMinutes: Int = 360,
 ) {
     data class BusyInterval(val start: Instant, val end: Instant)
     data class Slot(val start: Instant, val end: Instant)
@@ -35,20 +37,46 @@ class DeterministicScheduler(
             } else {
                 day.atTime(allowedEnd).atZone(zoneId).toInstant()
             }
+            val dayBusy = sortedBusy.filter { it.end.isAfter(dayStart) && it.start.isBefore(dayEnd) }
+            val occupiedMinutes = mergedDurationMinutes(dayBusy, dayStart, dayEnd)
+            if (occupiedMinutes + durationMinutes > dailyCapacityMinutes) {
+                day = day.plusDays(1)
+                continue
+            }
             var cursor = maxOf(roundUp(now), dayStart)
             if (cursor.isBefore(dayEnd)) {
-                sortedBusy.forEach { interval ->
-                    if (!interval.end.isAfter(cursor) || !interval.start.isBefore(dayEnd)) return@forEach
-                    if (!cursor.plus(duration).isAfter(interval.start)) {
+                dayBusy.forEach { interval ->
+                    val bufferedStart = interval.start.minus(bufferMinutes.toLong(), ChronoUnit.MINUTES)
+                    val bufferedEnd = interval.end.plus(bufferMinutes.toLong(), ChronoUnit.MINUTES)
+                    if (!bufferedEnd.isAfter(cursor) || !bufferedStart.isBefore(dayEnd)) return@forEach
+                    if (!cursor.plus(duration).isAfter(bufferedStart)) {
                         return Slot(cursor, cursor.plus(duration))
                     }
-                    if (interval.end.isAfter(cursor)) cursor = roundUp(interval.end)
+                    if (bufferedEnd.isAfter(cursor)) cursor = roundUp(bufferedEnd)
                 }
                 if (!cursor.plus(duration).isAfter(dayEnd)) return Slot(cursor, cursor.plus(duration))
             }
             day = day.plusDays(1)
         }
         return null
+    }
+
+    private fun mergedDurationMinutes(intervals: List<BusyInterval>, dayStart: Instant, dayEnd: Instant): Int {
+        if (intervals.isEmpty()) return 0
+        var total = 0L
+        var start = maxOf(intervals.first().start, dayStart)
+        var end = minOf(intervals.first().end, dayEnd)
+        intervals.drop(1).forEach { interval ->
+            val nextStart = maxOf(interval.start, dayStart)
+            val nextEnd = minOf(interval.end, dayEnd)
+            if (!nextStart.isAfter(end)) end = maxOf(end, nextEnd)
+            else {
+                total += Duration.between(start, end).toMinutes()
+                start = nextStart
+                end = nextEnd
+            }
+        }
+        return (total + Duration.between(start, end).toMinutes()).toInt()
     }
 
     private fun roundUp(instant: Instant): Instant {
@@ -64,4 +92,3 @@ class DeterministicScheduler(
         const val SLOT_GRANULARITY_MINUTES = 5
     }
 }
-

@@ -8,6 +8,7 @@ import app.hisho.capture.Deduplication
 import app.hisho.capture.NormalizedNotification
 import app.hisho.security.EncryptedPayloadStore
 import app.hisho.intelligence.LocalTaskProcessor
+import app.hisho.intelligence.ActionTitleGenerator
 
 class CaptureQueueDatabase(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -27,6 +28,7 @@ class CaptureQueueDatabase(context: Context) :
         val effortMinutes: Int,
         val title: String,
         val body: String,
+        val actionTitle: String,
     )
     data class UnscheduledCapture(
         val id: Long,
@@ -44,6 +46,7 @@ class CaptureQueueDatabase(context: Context) :
         val category: String,
         val state: String,
         val reason: String,
+        val actionTitle: String,
     )
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -75,7 +78,8 @@ class CaptureQueueDatabase(context: Context) :
                 candidate_reason TEXT NOT NULL DEFAULT 'legacy',
                 scheduled_start INTEGER,
                 scheduled_end INTEGER,
-                calendar_event_id TEXT
+                calendar_event_id TEXT,
+                action_title TEXT NOT NULL DEFAULT ''
             )
             """.trimIndent(),
         )
@@ -108,6 +112,9 @@ class CaptureQueueDatabase(context: Context) :
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN scheduled_end INTEGER")
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN calendar_event_id TEXT")
         }
+        if (oldVersion < 5) {
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN action_title TEXT NOT NULL DEFAULT ''")
+        }
     }
 
     fun enqueue(notification: NormalizedNotification): Boolean {
@@ -136,6 +143,7 @@ class CaptureQueueDatabase(context: Context) :
             put("category", metadata.category.name)
             put("is_candidate", if (metadata.isCandidate) 1 else 0)
             put("candidate_reason", metadata.candidateReason)
+            put("action_title", ActionTitleGenerator.generate(notification.title, notification.text))
         }
         val inserted = writableDatabase.insertWithOnConflict(
             "capture_queue",
@@ -151,7 +159,7 @@ class CaptureQueueDatabase(context: Context) :
         "capture_queue",
         arrayOf(
             "id", "source_package", "deadline_type", "effort", "priority",
-            "category", "state", "candidate_reason",
+            "category", "state", "candidate_reason", "action_title",
         ),
         null,
         null,
@@ -172,6 +180,7 @@ class CaptureQueueDatabase(context: Context) :
                         category = cursor.getString(5),
                         state = cursor.getString(6),
                         reason = cursor.getString(7),
+                        actionTitle = cursor.getString(8),
                     ),
                 )
             }
@@ -208,6 +217,18 @@ class CaptureQueueDatabase(context: Context) :
         )
     }
 
+    fun updateActionTitle(id: Long, actionTitle: String) {
+        val normalized = actionTitle.replace(Regex("\\s+"), " ").trim().take(60)
+        if (normalized.isBlank()) return
+        val values = ContentValues().apply { put("action_title", normalized) }
+        writableDatabase.update(
+            "capture_queue",
+            values,
+            "id = ? AND state NOT IN ('SYNCED','FAILED')",
+            arrayOf(id.toString()),
+        )
+    }
+
     private fun scrubExpiredIgnoredPayloads() {
         val cutoff = System.currentTimeMillis() - IGNORED_RETENTION_MILLIS
         val values = ContentValues().apply {
@@ -237,7 +258,7 @@ class CaptureQueueDatabase(context: Context) :
         return readableDatabase.query(
             "capture_queue",
             arrayOf(
-                "id", "dedup_key", "source_package", "deadline", "effort",
+                "id", "dedup_key", "source_package", "deadline", "effort", "action_title",
                 "title_cipher", "title_nonce", "body_cipher", "body_nonce",
             ),
             "state IN ('PENDING','RETRY')",
@@ -250,10 +271,10 @@ class CaptureQueueDatabase(context: Context) :
             buildList {
                 while (cursor.moveToNext()) {
                     val title = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(5), cursor.getBlob(6)),
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(6), cursor.getBlob(7)),
                     )
                     val body = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(7), cursor.getBlob(8)),
+                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(8), cursor.getBlob(9)),
                     )
                     add(
                         PendingCapture(
@@ -264,6 +285,7 @@ class CaptureQueueDatabase(context: Context) :
                             effortMinutes = effortMinutes(cursor.getString(4)),
                             title = title,
                             body = body,
+                            actionTitle = cursor.getString(5),
                         ),
                     )
                 }
@@ -375,7 +397,7 @@ class CaptureQueueDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 4
+        const val DATABASE_VERSION = 5
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
     }
 }
