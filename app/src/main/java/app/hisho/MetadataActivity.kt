@@ -26,6 +26,8 @@ import app.hisho.sync.CaptureSyncWorker
 class MetadataActivity : Activity() {
     private lateinit var root: LinearLayout
     private val database by lazy { CaptureQueueDatabase(this) }
+    private var selectedFilter = TaskFilter.ALL
+    private var searchQuery = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,9 +61,40 @@ class MetadataActivity : Activity() {
             ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { bottomMargin = 16.dp })
 
-        val items = database.recentMetadata()
+        val filterRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        filterRow.addView(Button(this).apply {
+            text = "絞り込み: ${selectedFilter.label}"
+            setOnClickListener {
+                selectedFilter = selectedFilter.next()
+                render()
+            }
+        })
+        filterRow.addView(Button(this).apply {
+            text = if (searchQuery.isBlank()) "検索" else "検索: $searchQuery"
+            setOnClickListener { showSearchDialog() }
+        })
+        if (searchQuery.isNotBlank()) {
+            filterRow.addView(Button(this).apply {
+                text = "解除"
+                setOnClickListener {
+                    searchQuery = ""
+                    render()
+                }
+            })
+        }
+        root.addView(filterRow)
+
+        val items = database.recentMetadata(
+            states = selectedFilter.states,
+            searchQuery = searchQuery,
+        )
         if (items.isEmpty()) {
-            root.addView(TextView(this).apply { text = "解析済み通知はありません" })
+            root.addView(TextView(this).apply {
+                text = if (selectedFilter == TaskFilter.ALL && searchQuery.isBlank()) {
+                    "解析済み通知はありません"
+                } else "条件に一致するタスクはありません"
+                setPadding(0, 16.dp, 0, 0)
+            })
             return
         }
         items.forEach { item ->
@@ -190,6 +223,23 @@ class MetadataActivity : Activity() {
             .show()
     }
 
+    private fun showSearchDialog() {
+        val input = EditText(this).apply {
+            setText(searchQuery)
+            hint = "タスク名または通知元"
+            if (text.isNotEmpty()) setSelection(text.length)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("タスクを検索")
+            .setView(input)
+            .setNegativeButton("キャンセル", null)
+            .setPositiveButton("検索") { _, _ ->
+                searchQuery = input.text.toString().trim()
+                render()
+            }
+            .show()
+    }
+
     private fun showDeadlineEditor(id: Long, currentDeadline: Long?) {
         val initial = currentDeadline?.let {
             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
@@ -277,5 +327,15 @@ class MetadataActivity : Activity() {
 
     private companion object {
         val DEADLINE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
+    }
+
+    private enum class TaskFilter(val label: String, val states: Set<String>) {
+        ALL("すべて", emptySet()),
+        PENDING("未同期", setOf("PENDING", "RETRY")),
+        SYNCED("同期済み", setOf("SYNCED", "COMPLETE_REQUESTED")),
+        ATTENTION("要確認", setOf("NEEDS_ATTENTION", "FAILED")),
+        COMPLETED("完了", setOf("COMPLETED"));
+
+        fun next(): TaskFilter = entries[(ordinal + 1) % entries.size]
     }
 }

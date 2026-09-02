@@ -214,14 +214,31 @@ class CaptureQueueDatabase(context: Context) :
         return inserted
     }
 
-    fun recentMetadata(limit: Int = 30): List<MetadataItem> = readableDatabase.query(
+    fun recentMetadata(
+        limit: Int = 100,
+        states: Set<String> = emptySet(),
+        searchQuery: String = "",
+    ): List<MetadataItem> {
+        val clauses = mutableListOf<String>()
+        val arguments = mutableListOf<String>()
+        if (states.isNotEmpty()) {
+            clauses += "state IN (${states.joinToString(",") { "?" }})"
+            arguments += states
+        }
+        if (searchQuery.isNotBlank()) {
+            clauses += "(action_title LIKE ? OR source_package LIKE ?)"
+            val pattern = "%${searchQuery.trim()}%"
+            arguments += pattern
+            arguments += pattern
+        }
+        return readableDatabase.query(
         "capture_queue",
         arrayOf(
             "id", "source_package", "deadline_type", "effort", "priority",
             "category", "state", "candidate_reason", "action_title", "deadline", "last_error_code",
         ),
-        null,
-        null,
+        clauses.takeIf { it.isNotEmpty() }?.joinToString(" AND "),
+        arguments.takeIf { it.isNotEmpty() }?.toTypedArray(),
         null,
         null,
         "created_at DESC",
@@ -246,6 +263,7 @@ class CaptureQueueDatabase(context: Context) :
                 )
             }
         }
+    }
     }
 
     fun cycleEffort(id: Long) {
