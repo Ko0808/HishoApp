@@ -66,6 +66,7 @@ class CaptureQueueDatabase(context: Context) :
         val state: String,
         val reason: String,
         val actionTitle: String,
+        val deadlineEpochMillis: Long?,
     )
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -184,7 +185,7 @@ class CaptureQueueDatabase(context: Context) :
         "capture_queue",
         arrayOf(
             "id", "source_package", "deadline_type", "effort", "priority",
-            "category", "state", "candidate_reason", "action_title",
+            "category", "state", "candidate_reason", "action_title", "deadline",
         ),
         null,
         null,
@@ -206,6 +207,7 @@ class CaptureQueueDatabase(context: Context) :
                         state = cursor.getString(6),
                         reason = cursor.getString(7),
                         actionTitle = cursor.getString(8),
+                        deadlineEpochMillis = if (cursor.isNull(9)) null else cursor.getLong(9),
                     ),
                 )
             }
@@ -222,6 +224,37 @@ class CaptureQueueDatabase(context: Context) :
         writableDatabase.execSQL(
             "UPDATE capture_queue SET effort = ? WHERE id = ?",
             arrayOf<Any?>(next, id),
+        )
+    }
+
+    fun cyclePriority(id: Long) {
+        val priorities = arrayOf("LOW", "NORMAL", "HIGH")
+        val current = readableDatabase.rawQuery(
+            "SELECT priority FROM capture_queue WHERE id = ?",
+            arrayOf(id.toString()),
+        ).use { if (it.moveToFirst()) it.getString(0) else "NORMAL" }
+        val next = priorities[(priorities.indexOf(current).coerceAtLeast(0) + 1) % priorities.size]
+        writableDatabase.execSQL(
+            "UPDATE capture_queue SET priority = ? WHERE id = ? AND state NOT IN ('SYNCED','FAILED','COMPLETED')",
+            arrayOf<Any?>(next, id),
+        )
+    }
+
+    fun updateDeadline(id: Long, deadlineEpochMillis: Long?) {
+        val values = ContentValues().apply {
+            if (deadlineEpochMillis == null) {
+                putNull("deadline")
+                put("deadline_type", "NONE")
+            } else {
+                put("deadline", deadlineEpochMillis)
+                put("deadline_type", "HARD")
+            }
+        }
+        writableDatabase.update(
+            "capture_queue",
+            values,
+            "id = ? AND state NOT IN ('SYNCED','FAILED','COMPLETED')",
+            arrayOf(id.toString()),
         )
     }
 

@@ -10,6 +10,12 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.EditText
 import android.app.AlertDialog
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import android.widget.Toast
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -70,7 +76,8 @@ class MetadataActivity : Activity() {
                 setTextColor(stateColor(item.state))
             })
             card.addView(TextView(this).apply {
-                text = "${item.category} / ${item.priority} / ${item.deadlineType}\n判定: ${item.reason}"
+                text = "${item.category} / 優先度 ${priorityLabel(item.priority)}" +
+                    "\n期限: ${formatDeadline(item.deadlineEpochMillis)}\n判定: ${item.reason}"
             })
             card.addView(TextView(this).apply {
                 text = item.actionTitle.ifBlank { "（旧データ：タイトル未保存）" }
@@ -78,13 +85,15 @@ class MetadataActivity : Activity() {
                 setPadding(0, 8.dp, 0, 4.dp)
             })
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val editable = item.state !in setOf("SYNCED", "FAILED", "COMPLETED")
             actions.addView(Button(this).apply {
                 text = "名前を編集"
-                isEnabled = item.state !in setOf("SYNCED", "FAILED") && item.actionTitle.isNotBlank()
+                isEnabled = editable
                 setOnClickListener { showTitleEditor(item.id, item.actionTitle) }
             })
             actions.addView(Button(this).apply {
                 text = "工数 ${item.effort}"
+                isEnabled = editable
                 setOnClickListener {
                     database.cycleEffort(item.id)
                     render()
@@ -100,6 +109,29 @@ class MetadataActivity : Activity() {
                 }
             })
             card.addView(actions)
+            val metadataActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            metadataActions.addView(Button(this).apply {
+                text = "優先度 ${priorityLabel(item.priority)}"
+                isEnabled = editable
+                setOnClickListener {
+                    database.cyclePriority(item.id)
+                    render()
+                }
+            })
+            metadataActions.addView(Button(this).apply {
+                text = "期限を設定"
+                isEnabled = editable
+                setOnClickListener { showDeadlineEditor(item.id, item.deadlineEpochMillis) }
+            })
+            metadataActions.addView(Button(this).apply {
+                text = "期限なし"
+                isEnabled = editable && item.deadlineEpochMillis != null
+                setOnClickListener {
+                    database.updateDeadline(item.id, null)
+                    render()
+                }
+            })
+            card.addView(metadataActions)
             root.addView(card, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -110,7 +142,8 @@ class MetadataActivity : Activity() {
     private fun showTitleEditor(id: Long, currentTitle: String) {
         val input = EditText(this).apply {
             setText(currentTitle)
-            setSelection(text.length)
+            hint = "例: 会議資料を田中さんへ送る"
+            if (text.isNotEmpty()) setSelection(text.length)
             maxLines = 2
         }
         AlertDialog.Builder(this)
@@ -123,6 +156,43 @@ class MetadataActivity : Activity() {
                 render()
             }
             .show()
+    }
+
+    private fun showDeadlineEditor(id: Long, currentDeadline: Long?) {
+        val initial = currentDeadline?.let {
+            Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
+        } ?: ZonedDateTime.now().plusDays(1).withHour(17).withMinute(0)
+        DatePickerDialog(
+            this,
+            { _, year, month, day ->
+                TimePickerDialog(
+                    this,
+                    { _, hour, minute ->
+                        val deadline = ZonedDateTime.of(
+                            year, month + 1, day, hour, minute, 0, 0, ZoneId.systemDefault(),
+                        ).toInstant().toEpochMilli()
+                        database.updateDeadline(id, deadline)
+                        render()
+                    },
+                    initial.hour,
+                    initial.minute,
+                    true,
+                ).show()
+            },
+            initial.year,
+            initial.monthValue - 1,
+            initial.dayOfMonth,
+        ).show()
+    }
+
+    private fun formatDeadline(epochMillis: Long?): String = epochMillis?.let {
+        DEADLINE_FORMAT.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))
+    } ?: "なし"
+
+    private fun priorityLabel(priority: String): String = when (priority) {
+        "HIGH" -> "高"
+        "LOW" -> "低"
+        else -> "通常"
     }
 
     private fun enqueueSync() {
@@ -161,4 +231,8 @@ class MetadataActivity : Activity() {
     }
 
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        val DEADLINE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
+    }
 }
