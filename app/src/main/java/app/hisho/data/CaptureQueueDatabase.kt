@@ -30,6 +30,7 @@ class CaptureQueueDatabase(context: Context) :
         val body: String,
         val actionTitle: String,
         val priority: String,
+        val recoveryCount: Int,
     )
     data class UnscheduledCapture(
         val id: Long,
@@ -38,6 +39,12 @@ class CaptureQueueDatabase(context: Context) :
         val deadlineEpochMillis: Long?,
         val effortMinutes: Int,
         val priority: String,
+        val recoveryCount: Int,
+    )
+    data class RecoveryCandidate(
+        val id: Long,
+        val googleTaskId: String,
+        val scheduledEndEpochMillis: Long,
     )
     data class MetadataItem(
         val id: Long,
@@ -81,7 +88,9 @@ class CaptureQueueDatabase(context: Context) :
                 scheduled_start INTEGER,
                 scheduled_end INTEGER,
                 calendar_event_id TEXT,
-                action_title TEXT NOT NULL DEFAULT ''
+                action_title TEXT NOT NULL DEFAULT '',
+                recovery_count INTEGER NOT NULL DEFAULT 0,
+                completed_at INTEGER
             )
             """.trimIndent(),
         )
@@ -116,6 +125,10 @@ class CaptureQueueDatabase(context: Context) :
         }
         if (oldVersion < 5) {
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN action_title TEXT NOT NULL DEFAULT ''")
+        }
+        if (oldVersion < 6) {
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN completed_at INTEGER")
         }
     }
 
@@ -261,6 +274,7 @@ class CaptureQueueDatabase(context: Context) :
             "capture_queue",
             arrayOf(
                 "id", "dedup_key", "source_package", "deadline", "effort", "action_title", "priority",
+                "recovery_count",
                 "title_cipher", "title_nonce", "body_cipher", "body_nonce",
             ),
             "state IN ('PENDING','RETRY')",
@@ -290,6 +304,7 @@ class CaptureQueueDatabase(context: Context) :
                             body = body,
                             actionTitle = cursor.getString(5),
                             priority = cursor.getString(6),
+                            recoveryCount = cursor.getInt(7),
                         ),
                     )
                 }
@@ -299,7 +314,7 @@ class CaptureQueueDatabase(context: Context) :
 
     fun unscheduled(limit: Int = 20): List<UnscheduledCapture> = readableDatabase.query(
         "capture_queue",
-        arrayOf("id", "dedup_key", "google_task_id", "deadline", "effort", "priority"),
+        arrayOf("id", "dedup_key", "google_task_id", "deadline", "effort", "priority", "recovery_count"),
         "state = 'SYNCED' AND google_task_id IS NOT NULL AND calendar_event_id IS NULL",
         null,
         null,
@@ -318,6 +333,7 @@ class CaptureQueueDatabase(context: Context) :
                         deadlineEpochMillis = if (cursor.isNull(3)) null else cursor.getLong(3),
                         effortMinutes = effortMinutes(cursor.getString(4)),
                         priority = cursor.getString(5),
+                        recoveryCount = cursor.getInt(6),
                     ),
                 )
             }
@@ -373,6 +389,48 @@ class CaptureQueueDatabase(context: Context) :
         )
     }
 
+    fun recoveryCandidates(endedBeforeEpochMillis: Long, limit: Int = 20): List<RecoveryCandidate> =
+        readableDatabase.query(
+            "capture_queue",
+            arrayOf("id", "google_task_id", "scheduled_end"),
+            "state = 'SYNCED' AND google_task_id IS NOT NULL AND scheduled_end IS NOT NULL " +
+                "AND scheduled_end < ?",
+            arrayOf(endedBeforeEpochMillis.toString()),
+            null,
+            null,
+            "scheduled_end ASC",
+            limit.toString(),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(RecoveryCandidate(cursor.getLong(0), cursor.getString(1), cursor.getLong(2)))
+                }
+            }
+        }
+
+    fun markCompleted(id: Long) {
+        val values = ContentValues().apply {
+            put("state", "COMPLETED")
+            put("completed_at", System.currentTimeMillis())
+        }
+        writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun markForReschedule(id: Long) {
+        writableDatabase.execSQL(
+            """
+            UPDATE capture_queue
+            SET calendar_event_id = NULL,
+                scheduled_start = NULL,
+                scheduled_end = NULL,
+                recovery_count = recovery_count + 1,
+                last_error_code = NULL
+            WHERE id = ? AND state = 'SYNCED'
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
     private fun count(where: String): Int = readableDatabase.rawQuery(
         "SELECT COUNT(*) FROM capture_queue WHERE $where",
         null,
@@ -403,7 +461,7 @@ class CaptureQueueDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 5
+        const val DATABASE_VERSION = 6
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
     }
 }

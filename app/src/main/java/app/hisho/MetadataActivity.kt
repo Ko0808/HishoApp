@@ -146,6 +146,7 @@ class MetadataActivity : Activity() {
         "PENDING" -> "未同期"
         "RETRY" -> "再試行待ち"
         "SYNCED" -> "同期済み"
+        "COMPLETED" -> "完了"
         "IGNORED" -> "除外"
         "FAILED" -> "同期失敗"
         else -> state
@@ -154,6 +155,7 @@ class MetadataActivity : Activity() {
     private fun stateColor(state: String): Int = when (state) {
         "PENDING", "RETRY" -> Color.rgb(181, 91, 28)
         "SYNCED" -> Color.rgb(28, 112, 76)
+        "COMPLETED" -> Color.rgb(58, 91, 160)
         "FAILED" -> Color.rgb(168, 62, 48)
         else -> Color.rgb(80, 86, 82)
     }

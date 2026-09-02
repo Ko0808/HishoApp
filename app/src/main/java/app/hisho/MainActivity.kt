@@ -16,6 +16,8 @@ import android.widget.Toast
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.WorkManager
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.auth.GoogleTasksAuthorization
@@ -23,7 +25,10 @@ import app.hisho.capture.CapturePreferences
 import app.hisho.capture.HishoNotificationListener
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.sync.CaptureSyncWorker
+import app.hisho.sync.TaskRecoveryWorker
+import java.util.concurrent.TimeUnit
 import app.hisho.scheduling.SchedulingPreferences
+import app.hisho.scheduling.RecoveryPreferences
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -37,6 +42,7 @@ class MainActivity : Activity() {
         authorization = GoogleTasksAuthorization(this)
         title = getString(R.string.app_name)
         setContentView(content())
+        if (RecoveryPreferences(this).enabled) scheduleRecoveryChecks()
     }
 
     override fun onResume() {
@@ -131,6 +137,21 @@ class MainActivity : Activity() {
                 renderSchedulingSettings(scheduling)
             }
         }, matchWidth())
+        val recoveryPreferences = RecoveryPreferences(this)
+        root.addView(CheckBox(this).apply {
+            text = "予定終了後も未完了なら自動で再配置"
+            isChecked = recoveryPreferences.enabled
+            setOnCheckedChangeListener { _, checked ->
+                recoveryPreferences.enabled = checked
+                if (checked) {
+                    scheduleRecoveryChecks()
+                    Toast.makeText(this@MainActivity, "未完了タスクの確認を開始しました", Toast.LENGTH_SHORT).show()
+                } else {
+                    WorkManager.getInstance(this@MainActivity)
+                        .cancelUniqueWork(TaskRecoveryWorker.UNIQUE_WORK_NAME)
+                }
+            }
+        })
         renderSchedulingSettings(scheduling)
         return ScrollView(this).apply { addView(root) }
     }
@@ -208,6 +229,21 @@ class MainActivity : Activity() {
             CaptureSyncWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.REPLACE,
             OneTimeWorkRequestBuilder<CaptureSyncWorker>().build(),
+        )
+    }
+
+    private fun scheduleRecoveryChecks() {
+        val workManager = WorkManager.getInstance(this)
+        workManager.enqueueUniquePeriodicWork(
+            TaskRecoveryWorker.UNIQUE_WORK_NAME,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<TaskRecoveryWorker>(
+                TaskRecoveryWorker.REPEAT_INTERVAL_MINUTES,
+                TimeUnit.MINUTES,
+            ).build(),
+        )
+        workManager.enqueue(
+            OneTimeWorkRequestBuilder<TaskRecoveryWorker>().build(),
         )
     }
 

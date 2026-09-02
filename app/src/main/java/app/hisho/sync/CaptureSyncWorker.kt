@@ -99,6 +99,7 @@ class CaptureSyncWorker(
                 conciseTitle,
                 capture.effortMinutes,
                 capture.deadlineEpochMillis,
+                capture.recoveryCount,
             )
             database.markScheduled(
                 capture.id,
@@ -135,6 +136,7 @@ class CaptureSyncWorker(
             conciseTitle,
             capture.effortMinutes,
             capture.deadlineEpochMillis,
+            capture.recoveryCount,
         )
         database.markScheduled(
             capture.id,
@@ -154,17 +156,19 @@ class CaptureSyncWorker(
         title: String,
         effortMinutes: Int,
         deadlineEpochMillis: Long?,
+        recoveryCount: Int,
     ): List<GoogleCalendarApi.CalendarEvent> {
         val blocks = TaskBlockPlanner.split(effortMinutes)
         val events = mutableListOf<GoogleCalendarApi.CalendarEvent>()
         blocks.forEachIndexed { index, blockMinutes ->
-            val blockId = "$captureId:block:${index + 1}"
+            val blockId = "$captureId:recovery:$recoveryCount:block:${index + 1}"
             val now = Instant.now()
             calendarApi.findEvent(blockId, now.minus(1, ChronoUnit.DAYS))?.let {
                 events += it
                 return@forEachIndexed
             }
-            val blockTitle = if (blocks.size == 1) title else "$title (${index + 1}/${blocks.size})"
+            val partTitle = if (blocks.size == 1) title else "$title (${index + 1}/${blocks.size})"
+            val blockTitle = if (recoveryCount == 0) partTitle else "$partTitle [再計画$recoveryCount]"
             events += scheduleBlock(
                 calendarApi, scheduler, blockId, googleTaskId, blockTitle,
                 blockMinutes, deadlineEpochMillis, now,
