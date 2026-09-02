@@ -5,6 +5,8 @@ import android.service.notification.StatusBarNotification
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.Constraints
+import androidx.work.NetworkType
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.sync.CaptureSyncWorker
 
@@ -20,9 +22,12 @@ class HishoNotificationListener : NotificationListenerService() {
             WorkManager.getInstance(this).enqueueUniqueWork(
                 CaptureSyncWorker.UNIQUE_WORK_NAME,
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
-                OneTimeWorkRequestBuilder<CaptureSyncWorker>().build(),
+                OneTimeWorkRequestBuilder<CaptureSyncWorker>()
+                    .setConstraints(
+                        Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build(),
+                    )
+                    .build(),
             )
         }
     }
 }
-

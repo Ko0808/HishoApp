@@ -18,6 +18,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.Constraints
+import androidx.work.NetworkType
 import androidx.work.WorkManager
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.auth.GoogleTasksAuthorization
@@ -26,6 +28,7 @@ import app.hisho.capture.HishoNotificationListener
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.sync.CaptureSyncWorker
 import app.hisho.sync.TaskRecoveryWorker
+import app.hisho.sync.SyncStatusStore
 import java.util.concurrent.TimeUnit
 import app.hisho.scheduling.SchedulingPreferences
 import app.hisho.scheduling.RecoveryPreferences
@@ -47,6 +50,7 @@ class MainActivity : Activity() {
         authorization = GoogleTasksAuthorization(this)
         title = getString(R.string.app_name)
         setContentView(content())
+        schedulePeriodicSync()
         if (RecoveryPreferences(this).enabled) scheduleRecoveryChecks()
     }
 
@@ -186,7 +190,7 @@ class MainActivity : Activity() {
             append("\n時間配置 ${stats.scheduled}件  •  広告除外 ${stats.ignored}件  •  失敗 ${stats.failed}件")
         }
         googleStatus.text = if (EncryptedAuthStore(this).isConnected()) {
-            "接続済み — Auto Captured Tasksへ同期します"
+            "接続済み — Auto Captured Tasksへ同期します\n${syncStatusText()}"
         } else {
             "未接続"
         }
@@ -276,8 +280,43 @@ class MainActivity : Activity() {
         WorkManager.getInstance(this).enqueueUniqueWork(
             CaptureSyncWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.REPLACE,
-            OneTimeWorkRequestBuilder<CaptureSyncWorker>().build(),
+            OneTimeWorkRequestBuilder<CaptureSyncWorker>()
+                .setConstraints(networkConstraints())
+                .build(),
         )
+    }
+
+    private fun schedulePeriodicSync() {
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            PERIODIC_SYNC_WORK_NAME,
+            ExistingPeriodicWorkPolicy.UPDATE,
+            PeriodicWorkRequestBuilder<CaptureSyncWorker>(15, TimeUnit.MINUTES)
+                .setConstraints(networkConstraints())
+                .build(),
+        )
+    }
+
+    private fun networkConstraints(): Constraints = Constraints.Builder()
+        .setRequiredNetworkType(NetworkType.CONNECTED)
+        .build()
+
+    private fun syncStatusText(): String {
+        val snapshot = SyncStatusStore(this).snapshot()
+        val label = when (snapshot.state) {
+            "RUNNING" -> "同期中"
+            "SUCCESS" -> "同期成功"
+            "WAITING" -> "再試行待ち"
+            "AUTH_REQUIRED" -> "再接続が必要"
+            "NETWORK_ERROR" -> "通信エラー"
+            "API_ERROR" -> "Google APIエラー"
+            else -> "まだ同期していません"
+        }
+        if (snapshot.updatedAt == 0L) return label
+        val time = formatTime(snapshot.updatedAt)
+        return buildString {
+            append("最終状態: $label ($time)")
+            snapshot.detail?.let { append("\n$it") }
+        }
     }
 
     private fun scheduleRecoveryChecks() {
@@ -315,5 +354,6 @@ class MainActivity : Activity() {
 
     private companion object {
         val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+        const val PERIODIC_SYNC_WORK_NAME = "periodic-capture-sync"
     }
 }

@@ -24,12 +24,18 @@ class CaptureSyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
+        val statusStore = SyncStatusStore(applicationContext)
+        statusStore.markRunning()
         val authStore = EncryptedAuthStore(applicationContext)
         val token = try {
             GoogleTasksTokenProvider(applicationContext).accessToken()
         } catch (_: IOException) {
+            statusStore.markNetworkError()
             return Result.retry()
-        } ?: return Result.success()
+        } ?: run {
+            statusStore.markAuthRequired()
+            return Result.success()
+        }
         val database = CaptureQueueDatabase(applicationContext)
         val tasksApi = GoogleTasksApi(token)
         val calendarApi = GoogleCalendarApi(token)
@@ -44,21 +50,28 @@ class CaptureSyncWorker(
                 scheduleExisting(tasksApi, calendarApi, scheduler, database, taskListId, capture)
             }
             if (database.stats().pending > 0 || database.unscheduled(1).isNotEmpty()) {
+                statusStore.markWaiting()
                 Result.retry()
             } else {
+                statusStore.markSuccess()
                 Result.success()
             }
         } catch (error: GoogleTasksApi.HttpFailure) {
             if (error.status == 401) {
                 authStore.clear()
-                Result.retry()
+                statusStore.markAuthRequired()
             } else {
-                Result.retry()
+                statusStore.markApiError("Google Tasks", error.status)
             }
+            Result.retry()
         } catch (error: GoogleCalendarApi.HttpFailure) {
-            if (error.status == 401) authStore.clear()
+            if (error.status == 401) {
+                authStore.clear()
+                statusStore.markAuthRequired()
+            } else statusStore.markApiError("Google Calendar", error.status)
             Result.retry()
         } catch (_: IOException) {
+            statusStore.markNetworkError()
             Result.retry()
         }
     }
