@@ -438,6 +438,7 @@ class MetadataActivity : Activity() {
         "com.Slack" -> "Slack"
         "com.discord" -> "Discord"
         "jp.naver.line.android" -> "LINE"
+        "app.hisho.manual" -> "手動入力"
         else -> packageName
     }
 

@@ -27,6 +27,11 @@
             android:exported="false"
             android:label="曜日別の稼働時間" />
 
+        <activity
+            android:name=".ManualTaskActivity"
+            android:exported="false"
+            android:label="タスクを追加" />
+
         <service
             android:name=".capture.HishoNotificationListener"
             android:exported="false"

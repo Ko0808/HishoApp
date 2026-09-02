@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.23.0` (`versionCode 25`)
+**Current version / 現在のバージョン:** `0.24.0` (`versionCode 26`)
 
 ---
 
@@ -35,6 +35,7 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 - 日本語の相対日付、曜日、日付・時刻表現の解析
 - XS／S／M／L／XLの工数、優先度、カテゴリ推定
 - Gmail、Slack、Discord、LINEに応じた短いタスク名の生成
+- Hisho内からタイトル、期限、工数、優先度を指定する手動タスク追加
 - タイトル、期限、優先度、工数の手動編集
 - 同期済みタスクの更新とCalendar再配置
 - Lを60分×2、XLを60分×4に分割
@@ -103,12 +104,13 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 ### 推奨する実機検証
 
 1. 対応アプリから通知を発生させ、同一通知の更新が重複しないことを確認します。
-2. 未同期タスクのタイトル、期限、優先度、工数を編集して同期します。
-3. Calendar枠が稼働時間内にあり、既存予定・土日・昼休みを避けることを確認します。
-4. Sは25分、Mは60分、Lは2枠、XLは4枠になることを確認します。
-5. 同期済みタスクを編集し、以前の枠が整理されて再配置されることを確認します。
-6. 自動再配置を有効にし、未完了タスクが予定終了後に移動することを確認します。
-7. 再計画上限で「要確認」になり、再開または完了にできることを確認します。
+2. 「タスクを手動で追加」からタイトル、期限、工数、優先度を指定し、TasksとCalendarへ同期されることを確認します。
+3. 未同期タスクのタイトル、期限、優先度、工数を編集して同期します。
+4. Calendar枠が稼働時間内にあり、既存予定・土日・昼休みを避けることを確認します。
+5. Sは25分、Mは60分、Lは2枠、XLは4枠になることを確認します。
+6. 同期済みタスクを編集し、以前の枠が整理されて再配置されることを確認します。
+7. 自動再配置を有効にし、未完了タスクが予定終了後に移動することを確認します。
+8. 再計画上限で「要確認」になり、再開または完了にできることを確認します。
 
 ### プライバシーと安全性
 
@@ -133,7 +135,7 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 ### 今後の計画
 
 1. 祝日と希望時間帯
-2. 手動入力、Android共有メニュー、音声入力
+2. Android共有メニューと音声入力
 3. アカウント切断、OAuth権限取り消し、データ削除
 4. DB移行、API、オフライン、大量通知、バッテリー試験
 5. 本番署名、プライバシーポリシー、Google Play公開対応
@@ -168,6 +170,7 @@ Notification content is not currently sent to an external AI service.
 - Japanese relative-date, weekday, date, and time parsing
 - XS/S/M/L/XL effort, priority, and category inference
 - Source-aware titles for Gmail, Slack, Discord, and LINE
+- Manual task creation with a title, deadline, effort, and priority inside Hisho
 - Manual title, deadline, priority, and effort editing
 - Synced-task updates and Calendar rescheduling
 - Two 60-minute blocks for L and four blocks for XL tasks
@@ -235,12 +238,13 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 ### Recommended device validation
 
 1. Generate supported-app notifications and verify duplicate updates are ignored.
-2. Edit a pending task's title, deadline, priority, and effort, then sync it.
-3. Verify Calendar blocks stay within working hours and avoid events, weekends, and lunch.
-4. Verify S uses 25 minutes, M uses 60 minutes, L creates two blocks, and XL creates four.
-5. Edit a synced task and verify its prior blocks are replaced by a new schedule.
-6. Enable recovery and verify an unfinished task moves after its scheduled end.
-7. Verify a task exceeding its limit becomes **Needs attention** and can be restarted or completed.
+2. Create a task with a title, deadline, effort, and priority using **Add task manually**, then verify Tasks and Calendar synchronization.
+3. Edit a pending task's title, deadline, priority, and effort, then sync it.
+4. Verify Calendar blocks stay within working hours and avoid events, weekends, and lunch.
+5. Verify S uses 25 minutes, M uses 60 minutes, L creates two blocks, and XL creates four.
+6. Edit a synced task and verify its prior blocks are replaced by a new schedule.
+7. Enable recovery and verify an unfinished task moves after its scheduled end.
+8. Verify a task exceeding its limit becomes **Needs attention** and can be restarted or completed.
 
 ### Privacy and safety
 
@@ -265,7 +269,7 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 ### Roadmap
 
 1. Add public holidays and preferred time windows.
-2. Add manual entry, Android sharing, and voice capture.
+2. Add Android sharing and voice capture.
 3. Add account disconnect, OAuth revocation, and data-deletion controls.
 4. Expand migration, API, offline, load, and battery testing.
 5. Add production signing, privacy documentation, and Google Play release readiness.

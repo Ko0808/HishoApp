@@ -113,6 +113,10 @@ class MainActivity : Activity() {
         root.addView(section("端末内キュー"))
         metrics = TextView(this).apply { textSize = 16f }
         root.addView(metrics)
+        root.addView(Button(this).apply {
+            text = "タスクを手動で追加"
+            setOnClickListener { startActivity(Intent(this@MainActivity, ManualTaskActivity::class.java)) }
+        }, matchWidth())
         root.addView(TextView(this).apply {
             text = "通知本文はAndroid Keystoreの鍵で暗号化され、画面やログには表示しません。Google接続後、同期成功時に削除します。"
             setPadding(0, 12.dp, 0, 0)

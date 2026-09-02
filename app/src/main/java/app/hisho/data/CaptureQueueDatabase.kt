@@ -9,6 +9,7 @@ import app.hisho.capture.NormalizedNotification
 import app.hisho.security.EncryptedPayloadStore
 import app.hisho.intelligence.LocalTaskProcessor
 import app.hisho.intelligence.ActionTitleGenerator
+import java.util.UUID
 
 class CaptureQueueDatabase(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -229,6 +230,46 @@ class CaptureQueueDatabase(context: Context) :
         ) != -1L
         if (!inserted) incrementMetric("duplicates")
         return inserted
+    }
+
+    fun enqueueManual(
+        actionTitle: String,
+        deadlineEpochMillis: Long?,
+        effort: String,
+        priority: String,
+    ): Long {
+        val normalizedTitle = actionTitle.replace(Regex("\\s+"), " ").trim().take(60)
+        require(normalizedTitle.isNotBlank())
+        val crypto = EncryptedPayloadStore()
+        val encryptedTitle = crypto.encrypt(normalizedTitle)
+        val encryptedBody = crypto.encrypt("")
+        val dedupKey = "manual:${UUID.randomUUID()}"
+        return writableDatabase.insertOrThrow(
+            "capture_queue",
+            null,
+            ContentValues().apply {
+                put("dedup_key", dedupKey)
+                put("content_hash", dedupKey)
+                put("source_package", MANUAL_SOURCE)
+                put("source_category", "manual")
+                put("notification_key", dedupKey)
+                put("posted_at", System.currentTimeMillis())
+                put("title_cipher", encryptedTitle.cipherText)
+                put("title_nonce", encryptedTitle.nonce)
+                put("body_cipher", encryptedBody.cipherText)
+                put("body_nonce", encryptedBody.nonce)
+                put("state", "PENDING")
+                put("created_at", System.currentTimeMillis())
+                if (deadlineEpochMillis == null) putNull("deadline") else put("deadline", deadlineEpochMillis)
+                put("deadline_type", if (deadlineEpochMillis == null) "NONE" else "HARD")
+                put("effort", effort)
+                put("priority", priority)
+                put("category", "OTHER")
+                put("is_candidate", 1)
+                put("candidate_reason", "manual_entry")
+                put("action_title", normalizedTitle)
+            },
+        )
     }
 
     fun recentMetadata(
@@ -904,5 +945,6 @@ class CaptureQueueDatabase(context: Context) :
         const val DATABASE_NAME = "hisho_capture.db"
         const val DATABASE_VERSION = 10
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
+        const val MANUAL_SOURCE = "app.hisho.manual"
     }
 }
