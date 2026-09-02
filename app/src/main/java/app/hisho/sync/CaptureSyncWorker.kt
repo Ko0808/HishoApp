@@ -9,6 +9,7 @@ import app.hisho.data.CaptureQueueDatabase
 import app.hisho.intelligence.ActionTitleGenerator
 import app.hisho.scheduling.DeterministicScheduler
 import app.hisho.scheduling.SchedulingPreferences
+import app.hisho.scheduling.TaskBlockPlanner
 import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
@@ -90,7 +91,7 @@ class CaptureSyncWorker(
                 due = capture.deadlineEpochMillis?.let { Instant.ofEpochMilli(it).toString() },
             )
             if (existing != null) tasksApi.updateTaskTitle(taskListId, task.id, conciseTitle)
-            val event = schedule(
+            val events = scheduleBlocks(
                 calendarApi,
                 scheduler,
                 capture.dedupKey,
@@ -102,9 +103,9 @@ class CaptureSyncWorker(
             database.markScheduled(
                 capture.id,
                 task.id,
-                event.id,
-                event.start.toEpochMilli(),
-                event.end.toEpochMilli(),
+                events.first().id,
+                events.first().start.toEpochMilli(),
+                events.last().end.toEpochMilli(),
                 scrubPayload = true,
             )
         } catch (error: Exception) {
@@ -126,7 +127,7 @@ class CaptureSyncWorker(
         if (conciseTitle != task.title) {
             tasksApi.updateTaskTitle(taskListId, task.id, conciseTitle)
         }
-        val event = schedule(
+        val events = scheduleBlocks(
             calendarApi,
             scheduler,
             capture.dedupKey,
@@ -138,14 +139,14 @@ class CaptureSyncWorker(
         database.markScheduled(
             capture.id,
             task.id,
-            event.id,
-            event.start.toEpochMilli(),
-            event.end.toEpochMilli(),
+            events.first().id,
+            events.first().start.toEpochMilli(),
+            events.last().end.toEpochMilli(),
             scrubPayload = false,
         )
     }
 
-    private fun schedule(
+    private fun scheduleBlocks(
         calendarApi: GoogleCalendarApi,
         scheduler: DeterministicScheduler,
         captureId: String,
@@ -153,9 +154,35 @@ class CaptureSyncWorker(
         title: String,
         effortMinutes: Int,
         deadlineEpochMillis: Long?,
+    ): List<GoogleCalendarApi.CalendarEvent> {
+        val blocks = TaskBlockPlanner.split(effortMinutes)
+        val events = mutableListOf<GoogleCalendarApi.CalendarEvent>()
+        blocks.forEachIndexed { index, blockMinutes ->
+            val blockId = "$captureId:block:${index + 1}"
+            val now = Instant.now()
+            calendarApi.findEvent(blockId, now.minus(1, ChronoUnit.DAYS))?.let {
+                events += it
+                return@forEachIndexed
+            }
+            val blockTitle = if (blocks.size == 1) title else "$title (${index + 1}/${blocks.size})"
+            events += scheduleBlock(
+                calendarApi, scheduler, blockId, googleTaskId, blockTitle,
+                blockMinutes, deadlineEpochMillis, now,
+            )
+        }
+        return events.sortedBy { it.start }
+    }
+
+    private fun scheduleBlock(
+        calendarApi: GoogleCalendarApi,
+        scheduler: DeterministicScheduler,
+        captureId: String,
+        googleTaskId: String,
+        title: String,
+        effortMinutes: Int,
+        deadlineEpochMillis: Long?,
+        now: Instant,
     ): GoogleCalendarApi.CalendarEvent {
-        val now = Instant.now()
-        calendarApi.findEvent(captureId, now.minus(1, ChronoUnit.DAYS))?.let { return it }
         val zoneId = ZoneId.systemDefault()
         val horizon = maxOf(
             now.plus(8, ChronoUnit.DAYS),

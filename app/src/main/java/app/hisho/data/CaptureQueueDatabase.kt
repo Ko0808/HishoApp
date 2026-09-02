@@ -29,6 +29,7 @@ class CaptureQueueDatabase(context: Context) :
         val title: String,
         val body: String,
         val actionTitle: String,
+        val priority: String,
     )
     data class UnscheduledCapture(
         val id: Long,
@@ -36,6 +37,7 @@ class CaptureQueueDatabase(context: Context) :
         val googleTaskId: String,
         val deadlineEpochMillis: Long?,
         val effortMinutes: Int,
+        val priority: String,
     )
     data class MetadataItem(
         val id: Long,
@@ -258,14 +260,15 @@ class CaptureQueueDatabase(context: Context) :
         return readableDatabase.query(
             "capture_queue",
             arrayOf(
-                "id", "dedup_key", "source_package", "deadline", "effort", "action_title",
+                "id", "dedup_key", "source_package", "deadline", "effort", "action_title", "priority",
                 "title_cipher", "title_nonce", "body_cipher", "body_nonce",
             ),
             "state IN ('PENDING','RETRY')",
             null,
             null,
             null,
-            "created_at ASC",
+            "CASE priority WHEN 'HIGH' THEN 0 WHEN 'NORMAL' THEN 1 ELSE 2 END, " +
+                "CASE WHEN deadline IS NULL THEN 1 ELSE 0 END, deadline ASC, created_at ASC",
             limit.toString(),
         ).use { cursor ->
             buildList {
@@ -286,6 +289,7 @@ class CaptureQueueDatabase(context: Context) :
                             title = title,
                             body = body,
                             actionTitle = cursor.getString(5),
+                            priority = cursor.getString(6),
                         ),
                     )
                 }
@@ -295,12 +299,13 @@ class CaptureQueueDatabase(context: Context) :
 
     fun unscheduled(limit: Int = 20): List<UnscheduledCapture> = readableDatabase.query(
         "capture_queue",
-        arrayOf("id", "dedup_key", "google_task_id", "deadline", "effort"),
+        arrayOf("id", "dedup_key", "google_task_id", "deadline", "effort", "priority"),
         "state = 'SYNCED' AND google_task_id IS NOT NULL AND calendar_event_id IS NULL",
         null,
         null,
         null,
-        "created_at ASC",
+        "CASE priority WHEN 'HIGH' THEN 0 WHEN 'NORMAL' THEN 1 ELSE 2 END, " +
+            "CASE WHEN deadline IS NULL THEN 1 ELSE 0 END, deadline ASC, created_at ASC",
         limit.toString(),
     ).use { cursor ->
         buildList {
@@ -312,6 +317,7 @@ class CaptureQueueDatabase(context: Context) :
                         googleTaskId = cursor.getString(2),
                         deadlineEpochMillis = if (cursor.isNull(3)) null else cursor.getLong(3),
                         effortMinutes = effortMinutes(cursor.getString(4)),
+                        priority = cursor.getString(5),
                     ),
                 )
             }
