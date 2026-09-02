@@ -21,6 +21,22 @@ class SchedulingPreferences(context: Context) {
     var lunchBreakEnabled: Boolean
         get() = preferences.getBoolean(KEY_LUNCH_BREAK_ENABLED, true)
         set(value) = preferences.edit().putBoolean(KEY_LUNCH_BREAK_ENABLED, value).apply()
+    val breakStartMinutes: Int get() = preferences.getInt(KEY_BREAK_START_MINUTES, 12 * 60)
+    val breakEndMinutes: Int get() = preferences.getInt(KEY_BREAK_END_MINUTES, 13 * 60)
+
+    fun setBreakStart(hour: Int, minute: Int): Boolean {
+        val value = hour * 60 + minute
+        if (value >= breakEndMinutes) return false
+        preferences.edit().putInt(KEY_BREAK_START_MINUTES, value).apply()
+        return true
+    }
+
+    fun setBreakEnd(hour: Int, minute: Int): Boolean {
+        val value = hour * 60 + minute
+        if (value <= breakStartMinutes) return false
+        preferences.edit().putInt(KEY_BREAK_END_MINUTES, value).apply()
+        return true
+    }
 
     fun cycleWorkHours() {
         val currentIndex = WORK_HOUR_PRESETS.indexOf(workdayStartHour to workdayEndHour).coerceAtLeast(0)
@@ -69,8 +85,8 @@ class SchedulingPreferences(context: Context) {
         bufferMinutes = bufferMinutes,
         dailyCapacityMinutes = dailyCapacityMinutes,
         weekendsEnabled = weekendsEnabled,
-        breakStart = if (lunchBreakEnabled) LocalTime.NOON else null,
-        breakEnd = if (lunchBreakEnabled) LocalTime.of(13, 0) else null,
+        breakStart = if (lunchBreakEnabled) LocalTime.ofSecondOfDay(breakStartMinutes * 60L) else null,
+        breakEnd = if (lunchBreakEnabled) LocalTime.ofSecondOfDay(breakEndMinutes * 60L) else null,
         dailyWindows = DayOfWeek.entries.associateWith { day ->
             if (isDayEnabled(day)) {
                 DeterministicScheduler.WorkingWindow(
@@ -93,6 +109,8 @@ class SchedulingPreferences(context: Context) {
         const val KEY_DAILY_CAPACITY = "daily_capacity"
         const val KEY_WEEKENDS_ENABLED = "weekends_enabled"
         const val KEY_LUNCH_BREAK_ENABLED = "lunch_break_enabled"
+        const val KEY_BREAK_START_MINUTES = "break_start_minutes"
+        const val KEY_BREAK_END_MINUTES = "break_end_minutes"
         const val DEFAULT_START_HOUR = 9
         const val DEFAULT_END_HOUR = 18
         const val DEFAULT_BUFFER_MINUTES = 10

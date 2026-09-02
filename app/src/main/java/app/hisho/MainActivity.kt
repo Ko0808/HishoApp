@@ -1,6 +1,7 @@
 package app.hisho
 
 import android.app.Activity
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.IntentSender
 import android.graphics.Color
@@ -168,13 +169,31 @@ class MainActivity : Activity() {
             }
         })
         root.addView(CheckBox(this).apply {
-            text = "昼休み 12:00〜13:00 を避ける"
+            text = "休憩時間を避ける"
             isChecked = scheduling.lunchBreakEnabled
             setOnCheckedChangeListener { _, checked ->
                 scheduling.lunchBreakEnabled = checked
                 renderSchedulingSettings(scheduling)
             }
         })
+        val breakStartButton = Button(this).apply {
+            text = "休憩開始 ${formatMinutes(scheduling.breakStartMinutes)}"
+            setOnClickListener {
+                showBreakTimePicker(scheduling, true) {
+                    text = "休憩開始 ${formatMinutes(scheduling.breakStartMinutes)}"
+                }
+            }
+        }
+        val breakEndButton = Button(this).apply {
+            text = "休憩終了 ${formatMinutes(scheduling.breakEndMinutes)}"
+            setOnClickListener {
+                showBreakTimePicker(scheduling, false) {
+                    text = "休憩終了 ${formatMinutes(scheduling.breakEndMinutes)}"
+                }
+            }
+        }
+        root.addView(breakStartButton, matchWidth())
+        root.addView(breakEndButton, matchWidth())
         val recoveryPreferences = RecoveryPreferences(this)
         val recoveryLimitButton = Button(this).apply {
             text = "再計画の上限 ${recoveryPreferences.maximumAttempts}回"
@@ -208,8 +227,30 @@ class MainActivity : Activity() {
                 "  •  余白 ${settings.bufferMinutes}分" +
                 "\n1日の予定上限 ${settings.dailyCapacityMinutes / 60}時間" +
                 "  •  土日 ${if (settings.weekendsEnabled) "使用" else "休み"}" +
-                "\n昼休み ${if (settings.lunchBreakEnabled) "12:00〜13:00" else "なし"}"
+                "\n休憩 ${if (settings.lunchBreakEnabled) {
+                    "${formatMinutes(settings.breakStartMinutes)}〜${formatMinutes(settings.breakEndMinutes)}"
+                } else "なし"}"
     }
+
+    private fun showBreakTimePicker(
+        settings: SchedulingPreferences,
+        editingStart: Boolean,
+        onSaved: () -> Unit,
+    ) {
+        val current = if (editingStart) settings.breakStartMinutes else settings.breakEndMinutes
+        TimePickerDialog(this, { _, hour, minute ->
+            val saved = if (editingStart) settings.setBreakStart(hour, minute)
+            else settings.setBreakEnd(hour, minute)
+            if (saved) {
+                onSaved()
+                renderSchedulingSettings(settings)
+            } else {
+                Toast.makeText(this, "開始時刻は終了時刻より前に設定してください", Toast.LENGTH_LONG).show()
+            }
+        }, current / 60, current % 60, true).show()
+    }
+
+    private fun formatMinutes(minutes: Int): String = "%02d:%02d".format(minutes / 60, minutes % 60)
 
     private fun renderStatus() {
         val enabled = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)

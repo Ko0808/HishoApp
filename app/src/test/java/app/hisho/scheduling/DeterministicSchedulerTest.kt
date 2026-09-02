@@ -87,4 +87,18 @@ class DeterministicSchedulerTest {
         val slot = custom.findSlot(wednesday, 25, null, emptyList())!!
         assertEquals(Instant.parse("2026-09-03T01:00:00Z"), slot.start)
     }
+
+    @Test
+    fun respectsCustomBreakTime() {
+        val custom = DeterministicScheduler(
+            zoneId = ZoneId.of("Asia/Tokyo"),
+            bufferMinutes = 5,
+            dailyCapacityMinutes = 480,
+            breakStart = LocalTime.of(14, 30),
+            breakEnd = LocalTime.of(15, 15),
+        )
+        val now = Instant.parse("2026-09-02T05:20:00Z") // 14:20 JST
+        val slot = custom.findSlot(now, 25, null, emptyList())!!
+        assertEquals(Instant.parse("2026-09-02T06:20:00Z"), slot.start) // 15:20 JST
+    }
 }
