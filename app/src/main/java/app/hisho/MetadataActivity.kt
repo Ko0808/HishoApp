@@ -9,6 +9,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.EditText
+import android.widget.CheckBox
 import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -28,6 +29,10 @@ class MetadataActivity : Activity() {
     private val database by lazy { CaptureQueueDatabase(this) }
     private var selectedFilter = TaskFilter.ALL
     private var searchQuery = ""
+    private val selectedTaskIds = mutableSetOf<Long>()
+    private lateinit var bulkCompleteButton: Button
+    private lateinit var bulkDeleteButton: Button
+    private lateinit var clearSelectionButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,6 +71,7 @@ class MetadataActivity : Activity() {
             text = "絞り込み: ${selectedFilter.label}"
             setOnClickListener {
                 selectedFilter = selectedFilter.next()
+                selectedTaskIds.clear()
                 render()
             }
         })
@@ -78,11 +84,33 @@ class MetadataActivity : Activity() {
                 text = "解除"
                 setOnClickListener {
                     searchQuery = ""
+                    selectedTaskIds.clear()
                     render()
                 }
             })
         }
         root.addView(filterRow)
+
+        val bulkRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        bulkCompleteButton = Button(this).apply {
+            setOnClickListener { confirmBulkCompletion() }
+        }
+        bulkDeleteButton = Button(this).apply {
+            setTextColor(Color.rgb(168, 62, 48))
+            setOnClickListener { confirmBulkDeletion() }
+        }
+        clearSelectionButton = Button(this).apply {
+            text = "選択解除"
+            setOnClickListener {
+                selectedTaskIds.clear()
+                render()
+            }
+        }
+        bulkRow.addView(bulkCompleteButton)
+        bulkRow.addView(bulkDeleteButton)
+        bulkRow.addView(clearSelectionButton)
+        root.addView(bulkRow)
+        updateBulkButtons()
 
         val items = database.recentMetadata(
             states = selectedFilter.states,
@@ -103,6 +131,14 @@ class MetadataActivity : Activity() {
                 setPadding(12.dp, 12.dp, 12.dp, 12.dp)
                 setBackgroundColor(Color.WHITE)
             }
+            card.addView(CheckBox(this).apply {
+                text = "選択"
+                isChecked = item.id in selectedTaskIds
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selectedTaskIds += item.id else selectedTaskIds -= item.id
+                    updateBulkButtons()
+                }
+            })
             card.addView(TextView(this).apply {
                 text = "${sourceLabel(item.sourcePackage)}  •  ${stateLabel(item.state)}"
                 textSize = 17f
@@ -246,6 +282,7 @@ class MetadataActivity : Activity() {
             .setNegativeButton("キャンセル", null)
             .setPositiveButton("検索") { _, _ ->
                 searchQuery = input.text.toString().trim()
+                selectedTaskIds.clear()
                 render()
             }
             .show()
@@ -261,6 +298,47 @@ class MetadataActivity : Activity() {
             .setNegativeButton("キャンセル", null)
             .setPositiveButton("削除") { _, _ ->
                 database.requestDeletion(id)
+                enqueueSync()
+                render()
+            }
+            .show()
+    }
+
+    private fun updateBulkButtons() {
+        val count = selectedTaskIds.size
+        bulkCompleteButton.text = "完了 ($count)"
+        bulkDeleteButton.text = "削除 ($count)"
+        bulkCompleteButton.isEnabled = count > 0
+        bulkDeleteButton.isEnabled = count > 0
+        clearSelectionButton.isEnabled = count > 0
+    }
+
+    private fun confirmBulkCompletion() {
+        val ids = selectedTaskIds.toList()
+        if (ids.isEmpty()) return
+        AlertDialog.Builder(this)
+            .setTitle("${ids.size}件を完了にしますか？")
+            .setMessage("Google Tasksへ同期済みの項目を完了にします。未同期・完了済みの項目は変更しません。")
+            .setNegativeButton("キャンセル", null)
+            .setPositiveButton("完了にする") { _, _ ->
+                ids.forEach(database::requestCompletion)
+                selectedTaskIds.clear()
+                enqueueSync()
+                render()
+            }
+            .show()
+    }
+
+    private fun confirmBulkDeletion() {
+        val ids = selectedTaskIds.toList()
+        if (ids.isEmpty()) return
+        AlertDialog.Builder(this)
+            .setTitle("${ids.size}件を削除しますか？")
+            .setMessage("同期済みの場合は、Google Tasksと追跡中のCalendar枠からも削除されます。この操作は元に戻せません。")
+            .setNegativeButton("キャンセル", null)
+            .setPositiveButton("削除") { _, _ ->
+                ids.forEach(database::requestDeletion)
+                selectedTaskIds.clear()
                 enqueueSync()
                 render()
             }
