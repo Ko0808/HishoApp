@@ -98,6 +98,14 @@ class GoogleTasksApi(private val accessToken: String) {
         )
     }
 
+    fun deleteTask(taskListId: String, taskId: String) {
+        try {
+            request("DELETE", "/tasks/v1/lists/${Uri.encode(taskListId)}/tasks/${Uri.encode(taskId)}")
+        } catch (error: HttpFailure) {
+            if (error.status !in setOf(404, 410)) throw error
+        }
+    }
+
     private fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = method

@@ -43,6 +43,13 @@ class CaptureSyncWorker(
 
         return try {
             val taskListId = tasksApi.findOrCreateTaskList(TASK_LIST_TITLE)
+            database.deletionRequests().forEach { request ->
+                database.calendarBlocks(request.id).forEach { block ->
+                    calendarApi.deleteEvent(block.calendarEventId)
+                }
+                request.googleTaskId?.let { tasksApi.deleteTask(taskListId, it) }
+                database.markDeleted(request.id)
+            }
             database.completionRequests().forEach { request ->
                 tasksApi.completeTask(taskListId, request.googleTaskId)
                 database.markCompleted(request.id)

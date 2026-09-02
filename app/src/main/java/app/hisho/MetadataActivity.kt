@@ -197,6 +197,13 @@ class MetadataActivity : Activity() {
                     }
                 })
             }
+            if (item.state !in setOf("DELETE_REQUESTED", "DELETED")) {
+                card.addView(Button(this).apply {
+                    text = "削除"
+                    setTextColor(Color.rgb(168, 62, 48))
+                    setOnClickListener { confirmDeletion(item.id, item.actionTitle) }
+                })
+            }
             root.addView(card, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -235,6 +242,22 @@ class MetadataActivity : Activity() {
             .setNegativeButton("キャンセル", null)
             .setPositiveButton("検索") { _, _ ->
                 searchQuery = input.text.toString().trim()
+                render()
+            }
+            .show()
+    }
+
+    private fun confirmDeletion(id: Long, title: String) {
+        AlertDialog.Builder(this)
+            .setTitle("タスクを削除しますか？")
+            .setMessage(
+                if (title.isBlank()) "このタスクを削除します。同期済みの場合はGoogle TasksとCalendarからも削除されます。"
+                else "「$title」を削除します。同期済みの場合はGoogle TasksとCalendarからも削除されます。",
+            )
+            .setNegativeButton("キャンセル", null)
+            .setPositiveButton("削除") { _, _ ->
+                database.requestDeletion(id)
+                enqueueSync()
                 render()
             }
             .show()
@@ -310,6 +333,7 @@ class MetadataActivity : Activity() {
         "FAILED" -> "同期失敗"
         "NEEDS_ATTENTION" -> "要確認（再計画上限）"
         "COMPLETE_REQUESTED" -> "完了を同期中"
+        "DELETE_REQUESTED" -> "削除を同期中"
         else -> state
     }
 
@@ -320,6 +344,7 @@ class MetadataActivity : Activity() {
         "FAILED" -> Color.rgb(168, 62, 48)
         "NEEDS_ATTENTION" -> Color.rgb(168, 62, 48)
         "COMPLETE_REQUESTED" -> Color.rgb(58, 91, 160)
+        "DELETE_REQUESTED" -> Color.rgb(168, 62, 48)
         else -> Color.rgb(80, 86, 82)
     }
 

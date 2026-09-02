@@ -52,6 +52,7 @@ class CaptureQueueDatabase(context: Context) :
         val recoveryBaseline: Int,
     )
     data class CompletionRequest(val id: Long, val googleTaskId: String)
+    data class DeletionRequest(val id: Long, val googleTaskId: String?)
     data class CalendarBlock(
         val blockIndex: Int,
         val generation: Int,
@@ -221,6 +222,7 @@ class CaptureQueueDatabase(context: Context) :
     ): List<MetadataItem> {
         val clauses = mutableListOf<String>()
         val arguments = mutableListOf<String>()
+        clauses += "state != 'DELETED'"
         if (states.isNotEmpty()) {
             clauses += "state IN (${states.joinToString(",") { "?" }})"
             arguments += states
@@ -624,6 +626,61 @@ class CaptureQueueDatabase(context: Context) :
     ).use { cursor ->
         buildList {
             while (cursor.moveToNext()) add(CompletionRequest(cursor.getLong(0), cursor.getString(1)))
+        }
+    }
+
+    fun requestDeletion(id: Long) {
+        val hasRemoteData = readableDatabase.rawQuery(
+            """
+            SELECT CASE WHEN google_task_id IS NOT NULL OR calendar_event_id IS NOT NULL THEN 1 ELSE 0 END
+            FROM capture_queue WHERE id = ?
+            """.trimIndent(),
+            arrayOf(id.toString()),
+        ).use { it.moveToFirst() && it.getInt(0) == 1 }
+        if (hasRemoteData) {
+            writableDatabase.execSQL(
+                "UPDATE capture_queue SET state = 'DELETE_REQUESTED', last_error_code = NULL WHERE id = ?",
+                arrayOf(id),
+            )
+        } else markDeleted(id)
+    }
+
+    fun deletionRequests(limit: Int = 20): List<DeletionRequest> = readableDatabase.query(
+        "capture_queue",
+        arrayOf("id", "google_task_id"),
+        "state = 'DELETE_REQUESTED'",
+        null, null, null, "created_at ASC", limit.toString(),
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(DeletionRequest(cursor.getLong(0), if (cursor.isNull(1)) null else cursor.getString(1)))
+            }
+        }
+    }
+
+    fun markDeleted(id: Long) {
+        writableDatabase.beginTransaction()
+        try {
+            writableDatabase.delete("calendar_blocks", "capture_queue_id = ?", arrayOf(id.toString()))
+            writableDatabase.update(
+                "capture_queue",
+                ContentValues().apply {
+                    put("state", "DELETED")
+                    put("title_cipher", ByteArray(0))
+                    put("title_nonce", ByteArray(0))
+                    put("body_cipher", ByteArray(0))
+                    put("body_nonce", ByteArray(0))
+                    putNull("calendar_event_id")
+                    putNull("scheduled_start")
+                    putNull("scheduled_end")
+                    putNull("last_error_code")
+                },
+                "id = ?",
+                arrayOf(id.toString()),
+            )
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
         }
     }
 
