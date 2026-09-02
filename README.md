@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.19.0` (`versionCode 21`)
+**Current version / 現在のバージョン:** `0.20.0` (`versionCode 22`)
 
 ---
 
@@ -43,6 +43,7 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 - 今日の予定、次の予定、締切注意、同期状態の表示
 - タスク状態の絞り込みとタスク名・通知元の検索
 - 確認付きのタスク削除とGoogle Tasks・追跡Calendar枠の連動削除
+- 通知元、状態、期限、配置、再計画回数、全Calendar枠を確認できるタスク詳細
 - 稼働時間、余白、1日の上限、土日、昼休みの設定
 - 未完了タスクの自動再配置、再計画上限、要確認状態
 - 要確認タスクの再開とGoogle Tasksへの完了同期
@@ -128,7 +129,7 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 
 ### 今後の計画
 
-1. タスク詳細と一括操作
+1. タスクの一括操作
 2. 曜日別稼働時間、祝日、自由な休憩時間、希望時間帯
 3. 手動入力、Android共有メニュー、音声入力
 4. アカウント切断、OAuth権限取り消し、データ削除
@@ -173,6 +174,7 @@ Notification content is not currently sent to an external AI service.
 - Today, next-task, deadline-risk, and synchronization-status summaries
 - Task-state filters and title/source search
 - Confirmed task deletion synchronized with Google Tasks and all tracked Calendar blocks
+- Task details covering source, state, deadline, schedule, recovery count, and every Calendar block
 - Working hours, buffers, daily capacity, weekend, and lunch settings
 - Optional unfinished-task recovery with configurable limits
 - Restart and Google Tasks completion actions for items needing attention
@@ -257,7 +259,7 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 
 ### Roadmap
 
-1. Add task details and bulk actions.
+1. Add bulk task actions.
 2. Add per-weekday hours, public holidays, custom breaks, and preferred time windows.
 3. Add manual entry, Android sharing, and voice capture.
 4. Add account disconnect, OAuth revocation, and data-deletion controls.

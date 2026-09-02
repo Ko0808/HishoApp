@@ -168,6 +168,10 @@ class MetadataActivity : Activity() {
                 }
             })
             card.addView(metadataActions)
+            card.addView(Button(this).apply {
+                text = "詳細"
+                setOnClickListener { showTaskDetail(item.id) }
+            })
             if (item.state == "NEEDS_ATTENTION") {
                 val recoveryActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 recoveryActions.addView(Button(this).apply {
@@ -263,6 +267,41 @@ class MetadataActivity : Activity() {
             .show()
     }
 
+    private fun showTaskDetail(id: Long) {
+        val detail = database.taskDetail(id) ?: return
+        val message = buildString {
+            append("状態: ${stateLabel(detail.state)}")
+            append("\n通知元: ${sourceLabel(detail.sourcePackage)}")
+            append("\n工数: ${detail.effort}  /  優先度: ${priorityLabel(detail.priority)}")
+            append("\nカテゴリ: ${detail.category}")
+            append("\n期限: ${formatDeadline(detail.deadlineEpochMillis)}")
+            append("\n配置: ${formatDateTime(detail.scheduledStartEpochMillis)}")
+            if (detail.scheduledEndEpochMillis != null) {
+                append(" 〜 ${formatDateTime(detail.scheduledEndEpochMillis)}")
+            }
+            append("\n再計画: ${detail.recoveryCount}回")
+            append("\nGoogle Task: ${detail.googleTaskId?.take(16) ?: "未同期"}")
+            if (detail.blocks.isEmpty()) append("\nCalendar枠: 未追跡または未配置")
+            else {
+                append("\n\nCalendar枠 (${detail.blocks.size}件)")
+                detail.blocks.forEach { block ->
+                    append("\n${block.blockIndex}. ${formatDateTime(block.startEpochMillis)}")
+                    append(" 〜 ${formatDateTime(block.endEpochMillis)}")
+                }
+            }
+            if (detail.lastErrorCode != null) append(errorDescription(detail.lastErrorCode))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(detail.actionTitle)
+            .setMessage(message)
+            .setPositiveButton("閉じる", null)
+            .show()
+    }
+
+    private fun formatDateTime(epochMillis: Long?): String = epochMillis?.let {
+        DETAIL_FORMAT.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))
+    } ?: "未配置"
+
     private fun showDeadlineEditor(id: Long, currentDeadline: Long?) {
         val initial = currentDeadline?.let {
             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
@@ -352,6 +391,7 @@ class MetadataActivity : Activity() {
 
     private companion object {
         val DEADLINE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
+        val DETAIL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
     }
 
     private enum class TaskFilter(val label: String, val states: Set<String>) {

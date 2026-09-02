@@ -61,6 +61,22 @@ class CaptureQueueDatabase(context: Context) :
         val endEpochMillis: Long,
     )
     data class TrackedCalendarBlock(val captureId: Long, val calendarEventId: String)
+    data class TaskDetail(
+        val id: Long,
+        val actionTitle: String,
+        val sourcePackage: String,
+        val state: String,
+        val deadlineEpochMillis: Long?,
+        val effort: String,
+        val priority: String,
+        val category: String,
+        val googleTaskId: String?,
+        val scheduledStartEpochMillis: Long?,
+        val scheduledEndEpochMillis: Long?,
+        val recoveryCount: Int,
+        val lastErrorCode: String?,
+        val blocks: List<CalendarBlock>,
+    )
     data class DashboardTask(
         val id: Long,
         val actionTitle: String,
@@ -538,6 +554,35 @@ class CaptureQueueDatabase(context: Context) :
                 )
             }
         }
+    }
+
+    fun taskDetail(id: Long): TaskDetail? = readableDatabase.query(
+        "capture_queue",
+        arrayOf(
+            "id", "action_title", "source_package", "state", "deadline", "effort", "priority",
+            "category", "google_task_id", "scheduled_start", "scheduled_end", "recovery_count",
+            "last_error_code",
+        ),
+        "id = ? AND state != 'DELETED'",
+        arrayOf(id.toString()),
+        null, null, null, "1",
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) null else TaskDetail(
+            id = cursor.getLong(0),
+            actionTitle = cursor.getString(1).ifBlank { "（タイトル未設定）" },
+            sourcePackage = cursor.getString(2),
+            state = cursor.getString(3),
+            deadlineEpochMillis = if (cursor.isNull(4)) null else cursor.getLong(4),
+            effort = cursor.getString(5),
+            priority = cursor.getString(6),
+            category = cursor.getString(7),
+            googleTaskId = if (cursor.isNull(8)) null else cursor.getString(8),
+            scheduledStartEpochMillis = if (cursor.isNull(9)) null else cursor.getLong(9),
+            scheduledEndEpochMillis = if (cursor.isNull(10)) null else cursor.getLong(10),
+            recoveryCount = cursor.getInt(11),
+            lastErrorCode = if (cursor.isNull(12)) null else cursor.getString(12),
+            blocks = calendarBlocks(id),
+        )
     }
 
     fun clearCalendarBlocks(captureId: Long) {
