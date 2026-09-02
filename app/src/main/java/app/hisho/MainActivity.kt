@@ -153,6 +153,22 @@ class MainActivity : Activity() {
                 renderSchedulingSettings(scheduling)
             }
         }, matchWidth())
+        root.addView(CheckBox(this).apply {
+            text = "土日にもタスクを配置"
+            isChecked = scheduling.weekendsEnabled
+            setOnCheckedChangeListener { _, checked ->
+                scheduling.weekendsEnabled = checked
+                renderSchedulingSettings(scheduling)
+            }
+        })
+        root.addView(CheckBox(this).apply {
+            text = "昼休み 12:00〜13:00 を避ける"
+            isChecked = scheduling.lunchBreakEnabled
+            setOnCheckedChangeListener { _, checked ->
+                scheduling.lunchBreakEnabled = checked
+                renderSchedulingSettings(scheduling)
+            }
+        })
         val recoveryPreferences = RecoveryPreferences(this)
         root.addView(CheckBox(this).apply {
             text = "予定終了後も未完了なら自動で再配置"
@@ -176,7 +192,9 @@ class MainActivity : Activity() {
         schedulingSummary.text =
             "稼働 ${settings.workdayStartHour}:00〜${settings.workdayEndHour}:00" +
                 "  •  余白 ${settings.bufferMinutes}分" +
-                "\n1日の予定上限 ${settings.dailyCapacityMinutes / 60}時間"
+                "\n1日の予定上限 ${settings.dailyCapacityMinutes / 60}時間" +
+                "  •  土日 ${if (settings.weekendsEnabled) "使用" else "休み"}" +
+                "\n昼休み ${if (settings.lunchBreakEnabled) "12:00〜13:00" else "なし"}"
     }
 
     private fun renderStatus() {

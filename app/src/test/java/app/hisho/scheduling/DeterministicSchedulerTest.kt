@@ -53,4 +53,18 @@ class DeterministicSchedulerTest {
         )!!
         assertEquals(Instant.parse("2026-09-03T00:00:00Z"), slot.start)
     }
+
+    @Test
+    fun skipsWeekendByDefault() {
+        val fridayNight = Instant.parse("2026-09-04T11:00:00Z") // Friday 20:00 JST
+        val slot = scheduler.findSlot(fridayNight, 25, null, emptyList())!!
+        assertEquals(Instant.parse("2026-09-07T00:00:00Z"), slot.start) // Monday 09:00 JST
+    }
+
+    @Test
+    fun avoidsLunchBreakWithBuffer() {
+        val beforeLunch = Instant.parse("2026-09-02T02:55:00Z") // 11:55 JST
+        val slot = scheduler.findSlot(beforeLunch, 25, null, emptyList())!!
+        assertEquals(Instant.parse("2026-09-02T04:10:00Z"), slot.start) // 13:10 JST
+    }
 }

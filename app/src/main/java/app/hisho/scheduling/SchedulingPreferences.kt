@@ -10,6 +10,12 @@ class SchedulingPreferences(context: Context) {
     val workdayEndHour: Int get() = preferences.getInt(KEY_END_HOUR, DEFAULT_END_HOUR)
     val bufferMinutes: Int get() = preferences.getInt(KEY_BUFFER_MINUTES, DEFAULT_BUFFER_MINUTES)
     val dailyCapacityMinutes: Int get() = preferences.getInt(KEY_DAILY_CAPACITY, DEFAULT_DAILY_CAPACITY)
+    var weekendsEnabled: Boolean
+        get() = preferences.getBoolean(KEY_WEEKENDS_ENABLED, false)
+        set(value) = preferences.edit().putBoolean(KEY_WEEKENDS_ENABLED, value).apply()
+    var lunchBreakEnabled: Boolean
+        get() = preferences.getBoolean(KEY_LUNCH_BREAK_ENABLED, true)
+        set(value) = preferences.edit().putBoolean(KEY_LUNCH_BREAK_ENABLED, value).apply()
 
     fun cycleWorkHours() {
         val currentIndex = WORK_HOUR_PRESETS.indexOf(workdayStartHour to workdayEndHour).coerceAtLeast(0)
@@ -32,6 +38,9 @@ class SchedulingPreferences(context: Context) {
         allowedEnd = LocalTime.of(workdayEndHour, 0),
         bufferMinutes = bufferMinutes,
         dailyCapacityMinutes = dailyCapacityMinutes,
+        weekendsEnabled = weekendsEnabled,
+        breakStart = if (lunchBreakEnabled) LocalTime.NOON else null,
+        breakEnd = if (lunchBreakEnabled) LocalTime.of(13, 0) else null,
     )
 
     private companion object {
@@ -40,6 +49,8 @@ class SchedulingPreferences(context: Context) {
         const val KEY_END_HOUR = "end_hour"
         const val KEY_BUFFER_MINUTES = "buffer_minutes"
         const val KEY_DAILY_CAPACITY = "daily_capacity"
+        const val KEY_WEEKENDS_ENABLED = "weekends_enabled"
+        const val KEY_LUNCH_BREAK_ENABLED = "lunch_break_enabled"
         const val DEFAULT_START_HOUR = 9
         const val DEFAULT_END_HOUR = 18
         const val DEFAULT_BUFFER_MINUTES = 10

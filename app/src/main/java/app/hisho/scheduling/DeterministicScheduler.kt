@@ -6,6 +6,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
+import java.time.DayOfWeek
 
 class DeterministicScheduler(
     private val zoneId: ZoneId = ZoneId.systemDefault(),
@@ -13,6 +14,9 @@ class DeterministicScheduler(
     private val allowedEnd: LocalTime = LocalTime.of(18, 0),
     private val bufferMinutes: Int = 10,
     private val dailyCapacityMinutes: Int = 360,
+    private val weekendsEnabled: Boolean = false,
+    private val breakStart: LocalTime? = LocalTime.NOON,
+    private val breakEnd: LocalTime? = LocalTime.of(13, 0),
 ) {
     data class BusyInterval(val start: Instant, val end: Instant)
     data class Slot(val start: Instant, val end: Instant)
@@ -31,13 +35,24 @@ class DeterministicScheduler(
         val sortedBusy = busy.sortedBy { it.start }
 
         while (!day.isAfter(finalDay)) {
+            if (!weekendsEnabled && day.dayOfWeek in WEEKEND_DAYS) {
+                day = day.plusDays(1)
+                continue
+            }
             val dayStart = day.atTime(allowedStart).atZone(zoneId).toInstant()
             val dayEnd = if (allowedEnd == LocalTime.MIDNIGHT) {
                 day.plusDays(1).atStartOfDay(zoneId).toInstant()
             } else {
                 day.atTime(allowedEnd).atZone(zoneId).toInstant()
             }
-            val dayBusy = sortedBusy.filter { it.end.isAfter(dayStart) && it.start.isBefore(dayEnd) }
+            val breakInterval = if (breakStart != null && breakEnd != null) {
+                BusyInterval(
+                    day.atTime(breakStart).atZone(zoneId).toInstant(),
+                    day.atTime(breakEnd).atZone(zoneId).toInstant(),
+                )
+            } else null
+            val dayBusy = (sortedBusy.filter { it.end.isAfter(dayStart) && it.start.isBefore(dayEnd) } +
+                listOfNotNull(breakInterval)).sortedBy { it.start }
             val occupiedMinutes = mergedDurationMinutes(dayBusy, dayStart, dayEnd)
             if (occupiedMinutes + durationMinutes > dailyCapacityMinutes) {
                 day = day.plusDays(1)
@@ -90,5 +105,6 @@ class DeterministicScheduler(
 
     private companion object {
         const val SLOT_GRANULARITY_MINUTES = 5
+        val WEEKEND_DAYS = setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
     }
 }
