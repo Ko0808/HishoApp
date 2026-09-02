@@ -68,7 +68,11 @@ class GoogleCalendarApi(private val accessToken: String) {
     }
 
     fun deleteEvent(eventId: String) {
-        request("DELETE", "/calendar/v3/calendars/$PRIMARY_CALENDAR/events/${Uri.encode(eventId)}")
+        try {
+            request("DELETE", "/calendar/v3/calendars/$PRIMARY_CALENDAR/events/${Uri.encode(eventId)}")
+        } catch (error: HttpFailure) {
+            if (error.status !in setOf(404, 410)) throw error
+        }
     }
 
     private fun JSONObject.toEvent(): CalendarEvent = CalendarEvent(

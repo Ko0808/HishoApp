@@ -52,6 +52,13 @@ class CaptureQueueDatabase(context: Context) :
         val recoveryBaseline: Int,
     )
     data class CompletionRequest(val id: Long, val googleTaskId: String)
+    data class CalendarBlock(
+        val blockIndex: Int,
+        val generation: Int,
+        val calendarEventId: String,
+        val startEpochMillis: Long,
+        val endEpochMillis: Long,
+    )
     data class DashboardTask(
         val id: Long,
         val actionTitle: String,
@@ -114,6 +121,7 @@ class CaptureQueueDatabase(context: Context) :
             )
             """.trimIndent(),
         )
+        createCalendarBlocksTable(db)
         db.execSQL("CREATE INDEX capture_queue_state_idx ON capture_queue(state, created_at)")
         db.execSQL(
             """
@@ -157,6 +165,7 @@ class CaptureQueueDatabase(context: Context) :
         if (oldVersion < 8) {
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN recovery_baseline INTEGER NOT NULL DEFAULT 0")
         }
+        if (oldVersion < 9) createCalendarBlocksTable(db)
     }
 
     fun enqueue(notification: NormalizedNotification): Boolean {
@@ -462,6 +471,53 @@ class CaptureQueueDatabase(context: Context) :
         writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
     }
 
+    fun replaceCalendarBlocks(captureId: Long, blocks: List<CalendarBlock>) {
+        writableDatabase.beginTransaction()
+        try {
+            writableDatabase.delete("calendar_blocks", "capture_queue_id = ?", arrayOf(captureId.toString()))
+            blocks.forEach { block ->
+                writableDatabase.insertOrThrow(
+                    "calendar_blocks",
+                    null,
+                    ContentValues().apply {
+                        put("capture_queue_id", captureId)
+                        put("block_index", block.blockIndex)
+                        put("generation", block.generation)
+                        put("calendar_event_id", block.calendarEventId)
+                        put("start_at", block.startEpochMillis)
+                        put("end_at", block.endEpochMillis)
+                    },
+                )
+            }
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    fun calendarBlocks(captureId: Long): List<CalendarBlock> = readableDatabase.query(
+        "calendar_blocks",
+        arrayOf("block_index", "generation", "calendar_event_id", "start_at", "end_at"),
+        "capture_queue_id = ?",
+        arrayOf(captureId.toString()),
+        null, null, "block_index ASC",
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(
+                    CalendarBlock(
+                        cursor.getInt(0), cursor.getInt(1), cursor.getString(2),
+                        cursor.getLong(3), cursor.getLong(4),
+                    ),
+                )
+            }
+        }
+    }
+
+    fun clearCalendarBlocks(captureId: Long) {
+        writableDatabase.delete("calendar_blocks", "capture_queue_id = ?", arrayOf(captureId.toString()))
+    }
+
     fun markRetry(id: Long, errorCode: String) {
         writableDatabase.execSQL(
             """
@@ -635,9 +691,29 @@ class CaptureQueueDatabase(context: Context) :
         else -> 25
     }
 
+    private fun createCalendarBlocksTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS calendar_blocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                capture_queue_id INTEGER NOT NULL,
+                block_index INTEGER NOT NULL,
+                generation INTEGER NOT NULL,
+                calendar_event_id TEXT NOT NULL UNIQUE,
+                start_at INTEGER NOT NULL,
+                end_at INTEGER NOT NULL,
+                UNIQUE(capture_queue_id, block_index, generation)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS calendar_blocks_capture_idx ON calendar_blocks(capture_queue_id)",
+        )
+    }
+
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 9
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
     }
 }

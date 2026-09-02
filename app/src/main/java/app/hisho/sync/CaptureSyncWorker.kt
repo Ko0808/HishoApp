@@ -127,6 +127,7 @@ class CaptureSyncWorker(
                 scrubPayload = true,
                 scheduledBlockCount = events.size,
             )
+            database.replaceCalendarBlocks(capture.id, events.toBlockRecords(capture.recoveryCount))
         } catch (error: Exception) {
             database.markRetry(capture.id, error.javaClass.simpleName)
             throw error
@@ -153,7 +154,7 @@ class CaptureSyncWorker(
         )
         var recoveryCount = capture.recoveryCount
         if (capture.rescheduleRequested) {
-            deleteScheduledBlocks(calendarApi, capture)
+            deleteScheduledBlocks(calendarApi, database, capture)
             database.beginRequestedReschedule(capture.id)
             recoveryCount += 1
         }
@@ -176,12 +177,20 @@ class CaptureSyncWorker(
             scrubPayload = false,
             scheduledBlockCount = events.size,
         )
+        database.replaceCalendarBlocks(capture.id, events.toBlockRecords(recoveryCount))
     }
 
     private fun deleteScheduledBlocks(
         calendarApi: GoogleCalendarApi,
+        database: CaptureQueueDatabase,
         capture: CaptureQueueDatabase.UnscheduledCapture,
     ) {
+        val tracked = database.calendarBlocks(capture.id)
+        if (tracked.isNotEmpty()) {
+            tracked.forEach { calendarApi.deleteEvent(it.calendarEventId) }
+            database.clearCalendarBlocks(capture.id)
+            return
+        }
         val from = Instant.now().minus(30, ChronoUnit.DAYS)
         val identifiers = buildList {
             add(capture.dedupKey) // Compatibility with schedules created before block splitting.
@@ -192,6 +201,18 @@ class CaptureSyncWorker(
         identifiers.distinct().forEach { identifier ->
             calendarApi.findEvent(identifier, from)?.let { calendarApi.deleteEvent(it.id) }
         }
+    }
+
+    private fun List<GoogleCalendarApi.CalendarEvent>.toBlockRecords(
+        generation: Int,
+    ): List<CaptureQueueDatabase.CalendarBlock> = sortedBy { it.start }.mapIndexed { index, event ->
+        CaptureQueueDatabase.CalendarBlock(
+            blockIndex = index + 1,
+            generation = generation,
+            calendarEventId = event.id,
+            startEpochMillis = event.start.toEpochMilli(),
+            endEpochMillis = event.end.toEpochMilli(),
+        )
     }
 
     private fun scheduleBlocks(
