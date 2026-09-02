@@ -74,7 +74,7 @@ class CaptureSyncWorker(
         val marker = "Hisho capture: ${capture.dedupKey}"
         try {
             val conciseTitle = capture.actionTitle.ifBlank {
-                ActionTitleGenerator.generate(capture.title, capture.body)
+                ActionTitleGenerator.generate(capture.title, capture.body, capture.sourcePackage)
             }
             val existing = tasksApi.findTaskByMarker(taskListId, marker)
             val task = existing ?: tasksApi.createTask(

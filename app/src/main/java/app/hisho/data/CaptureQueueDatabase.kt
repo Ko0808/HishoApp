@@ -169,7 +169,10 @@ class CaptureQueueDatabase(context: Context) :
             put("category", metadata.category.name)
             put("is_candidate", if (metadata.isCandidate) 1 else 0)
             put("candidate_reason", metadata.candidateReason)
-            put("action_title", ActionTitleGenerator.generate(notification.title, notification.text))
+            put(
+                "action_title",
+                ActionTitleGenerator.generate(notification.title, notification.text, notification.packageName),
+            )
         }
         val inserted = writableDatabase.insertWithOnConflict(
             "capture_queue",
