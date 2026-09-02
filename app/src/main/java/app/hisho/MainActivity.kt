@@ -133,10 +133,16 @@ class MainActivity : Activity() {
         schedulingSummary = TextView(this).apply { textSize = 16f }
         root.addView(schedulingSummary)
         root.addView(Button(this).apply {
-            text = "稼働時間を変更"
+            text = "平日の稼働時間を一括変更"
             setOnClickListener {
                 scheduling.cycleWorkHours()
                 renderSchedulingSettings(scheduling)
+            }
+        }, matchWidth())
+        root.addView(Button(this).apply {
+            text = "曜日別の稼働時間を設定"
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, WeeklyScheduleActivity::class.java))
             }
         }, matchWidth())
         root.addView(Button(this).apply {

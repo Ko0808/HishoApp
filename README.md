@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.21.0` (`versionCode 23`)
+**Current version / 現在のバージョン:** `0.22.0` (`versionCode 24`)
 
 ---
 
@@ -46,6 +46,7 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 - 通知元、状態、期限、配置、再計画回数、全Calendar枠を確認できるタスク詳細
 - 複数選択したタスクの確認付き一括完了・一括削除
 - 稼働時間、余白、1日の上限、土日、昼休みの設定
+- 月〜日それぞれの稼働ON／OFFと開始・終了時刻
 - 未完了タスクの自動再配置、再計画上限、要確認状態
 - 要確認タスクの再開とGoogle Tasksへの完了同期
 
@@ -124,13 +125,13 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 - 旧DBの項目には短縮タイトルが保存されていない場合があります。
 - 0.16.0より前に作成された未追跡予定は、Calendar側の移動・削除を自動検出できません。
 - 通知形式の違いにより、タイトル・期限・工数の推定が誤る場合があります。
-- 祝日、曜日別の個別稼働時間、自由な休憩時間、希望時間帯は未対応です。
+- 祝日、自由な休憩時間、希望時間帯は未対応です。
 - アカウント切断、OAuth権限取り消し、全データ削除UIは未実装です。
 - AIによる意味的な要約・推定・タスク分解は未実装です。
 
 ### 今後の計画
 
-1. 曜日別稼働時間、祝日、自由な休憩時間、希望時間帯
+1. 祝日、自由な休憩時間、希望時間帯
 2. 手動入力、Android共有メニュー、音声入力
 3. アカウント切断、OAuth権限取り消し、データ削除
 4. DB移行、API、オフライン、大量通知、バッテリー試験
@@ -177,6 +178,7 @@ Notification content is not currently sent to an external AI service.
 - Task details covering source, state, deadline, schedule, recovery count, and every Calendar block
 - Confirmed bulk completion and deletion for selected tasks
 - Working hours, buffers, daily capacity, weekend, and lunch settings
+- Per-day enablement and start/end times from Monday through Sunday
 - Optional unfinished-task recovery with configurable limits
 - Restart and Google Tasks completion actions for items needing attention
 
@@ -254,13 +256,13 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 - Migrated entries may not have a stored concise title.
 - Events created before 0.16.0 are not tracked and cannot be reconciled automatically.
 - Notification-format differences can cause incorrect title, deadline, or effort inference.
-- Public holidays, per-weekday hours, custom breaks, and preferred time windows are unsupported.
+- Public holidays, custom breaks, and preferred time windows are unsupported.
 - Account disconnect, OAuth revocation, and full data-deletion controls are not implemented.
 - AI-assisted semantic summarization, estimation, and decomposition are not implemented.
 
 ### Roadmap
 
-1. Add per-weekday hours, public holidays, custom breaks, and preferred time windows.
+1. Add public holidays, custom breaks, and preferred time windows.
 2. Add manual entry, Android sharing, and voice capture.
 3. Add account disconnect, OAuth revocation, and data-deletion controls.
 4. Expand migration, API, offline, load, and battery testing.

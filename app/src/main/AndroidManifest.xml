@@ -22,6 +22,11 @@
             android:exported="false"
             android:label="タスク推定の修正" />
 
+        <activity
+            android:name=".WeeklyScheduleActivity"
+            android:exported="false"
+            android:label="曜日別の稼働時間" />
+
         <service
             android:name=".capture.HishoNotificationListener"
             android:exported="false"

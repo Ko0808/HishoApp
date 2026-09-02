@@ -2,6 +2,7 @@ package app.hisho.scheduling
 
 import android.content.Context
 import java.time.LocalTime
+import java.time.DayOfWeek
 
 class SchedulingPreferences(context: Context) {
     private val preferences = context.getSharedPreferences(FILE_NAME, Context.MODE_PRIVATE)
@@ -12,7 +13,11 @@ class SchedulingPreferences(context: Context) {
     val dailyCapacityMinutes: Int get() = preferences.getInt(KEY_DAILY_CAPACITY, DEFAULT_DAILY_CAPACITY)
     var weekendsEnabled: Boolean
         get() = preferences.getBoolean(KEY_WEEKENDS_ENABLED, false)
-        set(value) = preferences.edit().putBoolean(KEY_WEEKENDS_ENABLED, value).apply()
+        set(value) {
+            preferences.edit().putBoolean(KEY_WEEKENDS_ENABLED, value).apply()
+            setDayEnabled(DayOfWeek.SATURDAY, value)
+            setDayEnabled(DayOfWeek.SUNDAY, value)
+        }
     var lunchBreakEnabled: Boolean
         get() = preferences.getBoolean(KEY_LUNCH_BREAK_ENABLED, true)
         set(value) = preferences.edit().putBoolean(KEY_LUNCH_BREAK_ENABLED, value).apply()
@@ -21,6 +26,9 @@ class SchedulingPreferences(context: Context) {
         val currentIndex = WORK_HOUR_PRESETS.indexOf(workdayStartHour to workdayEndHour).coerceAtLeast(0)
         val next = WORK_HOUR_PRESETS[(currentIndex + 1) % WORK_HOUR_PRESETS.size]
         preferences.edit().putInt(KEY_START_HOUR, next.first).putInt(KEY_END_HOUR, next.second).apply()
+        DayOfWeek.entries.filter { it !in WEEKEND }.forEach { day ->
+            preferences.edit().putInt(startKey(day), next.first).putInt(endKey(day), next.second).apply()
+        }
     }
 
     fun cycleBuffer() {
@@ -33,6 +41,28 @@ class SchedulingPreferences(context: Context) {
         preferences.edit().putInt(KEY_DAILY_CAPACITY, CAPACITY_PRESETS[(currentIndex + 1) % CAPACITY_PRESETS.size]).apply()
     }
 
+    fun isDayEnabled(day: DayOfWeek): Boolean = preferences.getBoolean(
+        enabledKey(day),
+        if (day in WEEKEND) weekendsEnabled else true,
+    )
+
+    fun setDayEnabled(day: DayOfWeek, enabled: Boolean) {
+        preferences.edit().putBoolean(enabledKey(day), enabled).apply()
+    }
+
+    fun startHour(day: DayOfWeek): Int = preferences.getInt(startKey(day), workdayStartHour)
+    fun endHour(day: DayOfWeek): Int = preferences.getInt(endKey(day), workdayEndHour)
+
+    fun cycleStartHour(day: DayOfWeek) {
+        val next = if (startHour(day) >= minOf(12, endHour(day) - 1)) 6 else startHour(day) + 1
+        preferences.edit().putInt(startKey(day), next).apply()
+    }
+
+    fun cycleEndHour(day: DayOfWeek) {
+        val next = if (endHour(day) >= 23) maxOf(15, startHour(day) + 1) else endHour(day) + 1
+        preferences.edit().putInt(endKey(day), next).apply()
+    }
+
     fun scheduler() = DeterministicScheduler(
         allowedStart = LocalTime.of(workdayStartHour, 0),
         allowedEnd = LocalTime.of(workdayEndHour, 0),
@@ -41,7 +71,19 @@ class SchedulingPreferences(context: Context) {
         weekendsEnabled = weekendsEnabled,
         breakStart = if (lunchBreakEnabled) LocalTime.NOON else null,
         breakEnd = if (lunchBreakEnabled) LocalTime.of(13, 0) else null,
+        dailyWindows = DayOfWeek.entries.associateWith { day ->
+            if (isDayEnabled(day)) {
+                DeterministicScheduler.WorkingWindow(
+                    LocalTime.of(startHour(day), 0),
+                    LocalTime.of(endHour(day), 0),
+                )
+            } else null
+        },
     )
+
+    private fun enabledKey(day: DayOfWeek) = "day_${day.value}_enabled"
+    private fun startKey(day: DayOfWeek) = "day_${day.value}_start"
+    private fun endKey(day: DayOfWeek) = "day_${day.value}_end"
 
     private companion object {
         const val FILE_NAME = "hisho_scheduling"
@@ -58,5 +100,6 @@ class SchedulingPreferences(context: Context) {
         val WORK_HOUR_PRESETS = listOf(8 to 17, 9 to 18, 10 to 19)
         val BUFFER_PRESETS = listOf(0, 5, 10, 15)
         val CAPACITY_PRESETS = listOf(240, 300, 360, 420)
+        val WEEKEND = setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
     }
 }

@@ -17,9 +17,11 @@ class DeterministicScheduler(
     private val weekendsEnabled: Boolean = false,
     private val breakStart: LocalTime? = LocalTime.NOON,
     private val breakEnd: LocalTime? = LocalTime.of(13, 0),
+    private val dailyWindows: Map<DayOfWeek, WorkingWindow?>? = null,
 ) {
     data class BusyInterval(val start: Instant, val end: Instant)
     data class Slot(val start: Instant, val end: Instant)
+    data class WorkingWindow(val start: LocalTime, val end: LocalTime)
 
     fun findSlot(
         now: Instant,
@@ -35,21 +37,24 @@ class DeterministicScheduler(
         val sortedBusy = busy.sortedBy { it.start }
 
         while (!day.isAfter(finalDay)) {
-            if (!weekendsEnabled && day.dayOfWeek in WEEKEND_DAYS) {
+            val window = dailyWindows?.get(day.dayOfWeek) ?: if (
+                dailyWindows == null && (weekendsEnabled || day.dayOfWeek !in WEEKEND_DAYS)
+            ) WorkingWindow(allowedStart, allowedEnd) else null
+            if (window == null) {
                 day = day.plusDays(1)
                 continue
             }
-            val dayStart = day.atTime(allowedStart).atZone(zoneId).toInstant()
-            val dayEnd = if (allowedEnd == LocalTime.MIDNIGHT) {
+            val dayStart = day.atTime(window.start).atZone(zoneId).toInstant()
+            val dayEnd = if (window.end == LocalTime.MIDNIGHT) {
                 day.plusDays(1).atStartOfDay(zoneId).toInstant()
             } else {
-                day.atTime(allowedEnd).atZone(zoneId).toInstant()
+                day.atTime(window.end).atZone(zoneId).toInstant()
             }
             val breakInterval = if (breakStart != null && breakEnd != null) {
                 BusyInterval(
                     day.atTime(breakStart).atZone(zoneId).toInstant(),
                     day.atTime(breakEnd).atZone(zoneId).toInstant(),
-                )
+                ).takeIf { it.end.isAfter(dayStart) && it.start.isBefore(dayEnd) }
             } else null
             val dayBusy = (sortedBusy.filter { it.end.isAfter(dayStart) && it.start.isBefore(dayEnd) } +
                 listOfNotNull(breakInterval)).sortedBy { it.start }

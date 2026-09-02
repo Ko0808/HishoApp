@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.time.Instant
 import java.time.ZoneId
+import java.time.DayOfWeek
+import java.time.LocalTime
 
 class DeterministicSchedulerTest {
     private val scheduler = DeterministicScheduler(
@@ -66,5 +68,23 @@ class DeterministicSchedulerTest {
         val beforeLunch = Instant.parse("2026-09-02T02:55:00Z") // 11:55 JST
         val slot = scheduler.findSlot(beforeLunch, 25, null, emptyList())!!
         assertEquals(Instant.parse("2026-09-02T04:10:00Z"), slot.start) // 13:10 JST
+    }
+
+    @Test
+    fun usesPerWeekdayWindowAndSkipsDisabledDay() {
+        val custom = DeterministicScheduler(
+            zoneId = ZoneId.of("Asia/Tokyo"),
+            bufferMinutes = 0,
+            dailyCapacityMinutes = 480,
+            dailyWindows = mapOf(
+                DayOfWeek.WEDNESDAY to null,
+                DayOfWeek.THURSDAY to DeterministicScheduler.WorkingWindow(
+                    LocalTime.of(10, 0), LocalTime.of(16, 0),
+                ),
+            ),
+        )
+        val wednesday = Instant.parse("2026-09-02T00:00:00Z")
+        val slot = custom.findSlot(wednesday, 25, null, emptyList())!!
+        assertEquals(Instant.parse("2026-09-03T01:00:00Z"), slot.start)
     }
 }
