@@ -41,9 +41,17 @@ class MetadataActivity : Activity() {
             setTextColor(Color.rgb(24, 39, 34))
         })
         root.addView(TextView(this).apply {
-            text = "工数ボタンは XS → S → M → L → XL の順に変更します。同期済みタスクの候補状態は変更されません。"
+            text = "「未同期」の項目だけ、名前・工数・除外設定を変更できます。変更後は下の「今すぐ同期」を押してください。"
             setPadding(0, 8.dp, 0, 16.dp)
         })
+
+        root.addView(Button(this).apply {
+            text = "今すぐ同期"
+            setOnClickListener { enqueueSync() }
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { bottomMargin = 16.dp })
 
         val items = database.recentMetadata()
         if (items.isEmpty()) {
@@ -57,8 +65,9 @@ class MetadataActivity : Activity() {
                 setBackgroundColor(Color.WHITE)
             }
             card.addView(TextView(this).apply {
-                text = "${sourceLabel(item.sourcePackage)}  •  ${item.state}"
+                text = "${sourceLabel(item.sourcePackage)}  •  ${stateLabel(item.state)}"
                 textSize = 17f
+                setTextColor(stateColor(item.state))
             })
             card.addView(TextView(this).apply {
                 text = "${item.category} / ${item.priority} / ${item.deadlineType}\n判定: ${item.reason}"
@@ -122,7 +131,7 @@ class MetadataActivity : Activity() {
             ExistingWorkPolicy.REPLACE,
             OneTimeWorkRequestBuilder<CaptureSyncWorker>().build(),
         )
-        Toast.makeText(this, "修正を保存しました", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "同期を開始しました", Toast.LENGTH_SHORT).show()
     }
 
     private fun sourceLabel(packageName: String): String = when (packageName) {
@@ -131,6 +140,22 @@ class MetadataActivity : Activity() {
         "com.discord" -> "Discord"
         "jp.naver.line.android" -> "LINE"
         else -> packageName
+    }
+
+    private fun stateLabel(state: String): String = when (state) {
+        "PENDING" -> "未同期"
+        "RETRY" -> "再試行待ち"
+        "SYNCED" -> "同期済み"
+        "IGNORED" -> "除外"
+        "FAILED" -> "同期失敗"
+        else -> state
+    }
+
+    private fun stateColor(state: String): Int = when (state) {
+        "PENDING", "RETRY" -> Color.rgb(181, 91, 28)
+        "SYNCED" -> Color.rgb(28, 112, 76)
+        "FAILED" -> Color.rgb(168, 62, 48)
+        else -> Color.rgb(80, 86, 82)
     }
 
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()

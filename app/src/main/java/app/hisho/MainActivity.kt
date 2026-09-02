@@ -95,6 +95,13 @@ class MainActivity : Activity() {
             setPadding(0, 12.dp, 0, 0)
         })
         root.addView(Button(this).apply {
+            text = "今すぐ同期"
+            setOnClickListener {
+                enqueueSync()
+                Toast.makeText(this@MainActivity, "同期を開始しました", Toast.LENGTH_SHORT).show()
+            }
+        }, matchWidth())
+        root.addView(Button(this).apply {
             text = "タスク推定を確認・修正"
             setOnClickListener { startActivity(Intent(this@MainActivity, MetadataActivity::class.java)) }
         }, matchWidth())
@@ -191,13 +198,17 @@ class MainActivity : Activity() {
 
     private fun finishAuthorization(accessToken: String) {
         EncryptedAuthStore(this).saveAccessToken(accessToken)
+        enqueueSync()
+        renderStatus()
+        Toast.makeText(this, "Google Tasksへ接続しました", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun enqueueSync() {
         WorkManager.getInstance(this).enqueueUniqueWork(
             CaptureSyncWorker.UNIQUE_WORK_NAME,
             ExistingWorkPolicy.REPLACE,
             OneTimeWorkRequestBuilder<CaptureSyncWorker>().build(),
         )
-        renderStatus()
-        Toast.makeText(this, "Google Tasksへ接続しました", Toast.LENGTH_SHORT).show()
     }
 
     private fun showAuthError(message: String?) {
