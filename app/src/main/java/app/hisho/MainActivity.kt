@@ -29,6 +29,10 @@ import app.hisho.sync.TaskRecoveryWorker
 import java.util.concurrent.TimeUnit
 import app.hisho.scheduling.SchedulingPreferences
 import app.hisho.scheduling.RecoveryPreferences
+import app.hisho.scheduling.ScheduleHealth
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -36,6 +40,7 @@ class MainActivity : Activity() {
     private lateinit var googleStatus: TextView
     private lateinit var authorization: GoogleTasksAuthorization
     private lateinit var schedulingSummary: TextView
+    private lateinit var todaySummary: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +72,13 @@ class MainActivity : Activity() {
             textSize = 16f
             setPadding(0, 4.dp, 0, 24.dp)
         })
+
+        root.addView(section("今日の予定"))
+        todaySummary = TextView(this).apply {
+            textSize = 16f
+            setPadding(0, 0, 0, 4.dp)
+        }
+        root.addView(todaySummary)
 
         status = TextView(this).apply { textSize = 18f }
         root.addView(status)
@@ -178,6 +190,42 @@ class MainActivity : Activity() {
         } else {
             "未接続"
         }
+        renderToday()
+    }
+
+    private fun renderToday() {
+        val now = System.currentTimeMillis()
+        val zone = ZoneId.systemDefault()
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        val tasks = CaptureQueueDatabase(this).dashboardTasks()
+            .filter { it.state == "SYNCED" }
+        val todayTasks = tasks.filter { task ->
+            task.scheduledStartEpochMillis?.let {
+                Instant.ofEpochMilli(it).atZone(zone).toLocalDate() == today
+            } == true
+        }
+        val next = tasks
+            .filter { (it.scheduledStartEpochMillis ?: Long.MIN_VALUE) >= now }
+            .minByOrNull { it.scheduledStartEpochMillis ?: Long.MAX_VALUE }
+        val atRisk = tasks.count {
+            ScheduleHealth.isAtRisk(now, it.deadlineEpochMillis, it.scheduledEndEpochMillis)
+        }
+        todaySummary.text = buildString {
+            if (next == null) append("次の予定はありません")
+            else append("次: ${formatTime(next.scheduledStartEpochMillis)}  ${next.actionTitle}")
+            append("\n今日 ${todayTasks.size}件  •  締切注意 ${atRisk}件")
+            todayTasks.take(3).forEach { task ->
+                append("\n${formatTime(task.scheduledStartEpochMillis)}  ${task.actionTitle}")
+                if (task.recoveryCount > 0) append("  再計画${task.recoveryCount}回")
+            }
+            if (todayTasks.size > 3) append("\nほか${todayTasks.size - 3}件")
+        }
+        todaySummary.setTextColor(if (atRisk > 0) Color.rgb(168, 62, 48) else Color.rgb(24, 39, 34))
+    }
+
+    private fun formatTime(epochMillis: Long?): String {
+        if (epochMillis == null) return "未配置"
+        return TIME_FORMAT.format(Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()))
     }
 
     private fun connectGoogleTasks() {
@@ -264,4 +312,8 @@ class MainActivity : Activity() {
     )
 
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    }
 }

@@ -46,6 +46,16 @@ class CaptureQueueDatabase(context: Context) :
         val googleTaskId: String,
         val scheduledEndEpochMillis: Long,
     )
+    data class DashboardTask(
+        val id: Long,
+        val actionTitle: String,
+        val sourcePackage: String,
+        val scheduledStartEpochMillis: Long?,
+        val scheduledEndEpochMillis: Long?,
+        val deadlineEpochMillis: Long?,
+        val recoveryCount: Int,
+        val state: String,
+    )
     data class MetadataItem(
         val id: Long,
         val sourcePackage: String,
@@ -429,6 +439,37 @@ class CaptureQueueDatabase(context: Context) :
             """.trimIndent(),
             arrayOf(id),
         )
+    }
+
+    fun dashboardTasks(limit: Int = 100): List<DashboardTask> = readableDatabase.query(
+        "capture_queue",
+        arrayOf(
+            "id", "action_title", "source_package", "scheduled_start", "scheduled_end",
+            "deadline", "recovery_count", "state",
+        ),
+        "state IN ('SYNCED','COMPLETED')",
+        null,
+        null,
+        null,
+        "CASE WHEN scheduled_start IS NULL THEN 1 ELSE 0 END, scheduled_start ASC",
+        limit.toString(),
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) {
+                add(
+                    DashboardTask(
+                        id = cursor.getLong(0),
+                        actionTitle = cursor.getString(1).ifBlank { "Google Tasksのタスク" },
+                        sourcePackage = cursor.getString(2),
+                        scheduledStartEpochMillis = if (cursor.isNull(3)) null else cursor.getLong(3),
+                        scheduledEndEpochMillis = if (cursor.isNull(4)) null else cursor.getLong(4),
+                        deadlineEpochMillis = if (cursor.isNull(5)) null else cursor.getLong(5),
+                        recoveryCount = cursor.getInt(6),
+                        state = cursor.getString(7),
+                    ),
+                )
+            }
+        }
     }
 
     private fun count(where: String): Int = readableDatabase.rawQuery(
