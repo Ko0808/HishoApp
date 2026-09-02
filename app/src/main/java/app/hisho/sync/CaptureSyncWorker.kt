@@ -121,6 +121,7 @@ class CaptureSyncWorker(
                 events.first().start.toEpochMilli(),
                 events.last().end.toEpochMilli(),
                 scrubPayload = true,
+                scheduledBlockCount = events.size,
             )
         } catch (error: Exception) {
             database.markRetry(capture.id, error.javaClass.simpleName)
@@ -137,9 +138,20 @@ class CaptureSyncWorker(
         capture: CaptureQueueDatabase.UnscheduledCapture,
     ) {
         val task = tasksApi.getTask(taskListId, capture.googleTaskId)
-        val conciseTitle = ActionTitleGenerator.generate("", task.title)
-        if (conciseTitle != task.title) {
-            tasksApi.updateTaskTitle(taskListId, task.id, conciseTitle)
+        val metadata = database.recentMetadata(100).firstOrNull { it.id == capture.id }
+        val conciseTitle = metadata?.actionTitle?.ifBlank { null }
+            ?: ActionTitleGenerator.generate("", task.title)
+        tasksApi.updateTask(
+            taskListId,
+            task.id,
+            conciseTitle,
+            capture.deadlineEpochMillis?.let { Instant.ofEpochMilli(it).toString() },
+        )
+        var recoveryCount = capture.recoveryCount
+        if (capture.rescheduleRequested) {
+            deleteScheduledBlocks(calendarApi, capture)
+            database.beginRequestedReschedule(capture.id)
+            recoveryCount += 1
         }
         val events = scheduleBlocks(
             calendarApi,
@@ -149,7 +161,7 @@ class CaptureSyncWorker(
             conciseTitle,
             capture.effortMinutes,
             capture.deadlineEpochMillis,
-            capture.recoveryCount,
+            recoveryCount,
         )
         database.markScheduled(
             capture.id,
@@ -158,7 +170,24 @@ class CaptureSyncWorker(
             events.first().start.toEpochMilli(),
             events.last().end.toEpochMilli(),
             scrubPayload = false,
+            scheduledBlockCount = events.size,
         )
+    }
+
+    private fun deleteScheduledBlocks(
+        calendarApi: GoogleCalendarApi,
+        capture: CaptureQueueDatabase.UnscheduledCapture,
+    ) {
+        val from = Instant.now().minus(30, ChronoUnit.DAYS)
+        val identifiers = buildList {
+            add(capture.dedupKey) // Compatibility with schedules created before block splitting.
+            repeat(capture.scheduledBlockCount) { index ->
+                add("${capture.dedupKey}:recovery:${capture.recoveryCount}:block:${index + 1}")
+            }
+        }
+        identifiers.distinct().forEach { identifier ->
+            calendarApi.findEvent(identifier, from)?.let { calendarApi.deleteEvent(it.id) }
+        }
     }
 
     private fun scheduleBlocks(

@@ -67,6 +67,10 @@ class GoogleCalendarApi(private val accessToken: String) {
         return request("POST", "/calendar/v3/calendars/$PRIMARY_CALENDAR/events", body).toEvent()
     }
 
+    fun deleteEvent(eventId: String) {
+        request("DELETE", "/calendar/v3/calendars/$PRIMARY_CALENDAR/events/${Uri.encode(eventId)}")
+    }
+
     private fun JSONObject.toEvent(): CalendarEvent = CalendarEvent(
         id = getString("id"),
         start = Instant.parse(getJSONObject("start").getString("dateTime")),

@@ -40,6 +40,8 @@ class CaptureQueueDatabase(context: Context) :
         val effortMinutes: Int,
         val priority: String,
         val recoveryCount: Int,
+        val rescheduleRequested: Boolean,
+        val scheduledBlockCount: Int,
     )
     data class RecoveryCandidate(
         val id: Long,
@@ -101,7 +103,9 @@ class CaptureQueueDatabase(context: Context) :
                 calendar_event_id TEXT,
                 action_title TEXT NOT NULL DEFAULT '',
                 recovery_count INTEGER NOT NULL DEFAULT 0,
-                completed_at INTEGER
+                completed_at INTEGER,
+                reschedule_requested INTEGER NOT NULL DEFAULT 0,
+                scheduled_block_count INTEGER NOT NULL DEFAULT 1
             )
             """.trimIndent(),
         )
@@ -140,6 +144,10 @@ class CaptureQueueDatabase(context: Context) :
         if (oldVersion < 6) {
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN recovery_count INTEGER NOT NULL DEFAULT 0")
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN completed_at INTEGER")
+        }
+        if (oldVersion < 7) {
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN reschedule_requested INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN scheduled_block_count INTEGER NOT NULL DEFAULT 1")
         }
     }
 
@@ -225,7 +233,11 @@ class CaptureQueueDatabase(context: Context) :
         ).use { if (it.moveToFirst()) it.getString(0) else "S" }
         val next = efforts[(efforts.indexOf(current).coerceAtLeast(0) + 1) % efforts.size]
         writableDatabase.execSQL(
-            "UPDATE capture_queue SET effort = ? WHERE id = ?",
+            """
+            UPDATE capture_queue SET effort = ?,
+                reschedule_requested = CASE WHEN state = 'SYNCED' THEN 1 ELSE reschedule_requested END
+            WHERE id = ? AND state NOT IN ('FAILED','COMPLETED')
+            """.trimIndent(),
             arrayOf<Any?>(next, id),
         )
     }
@@ -238,7 +250,11 @@ class CaptureQueueDatabase(context: Context) :
         ).use { if (it.moveToFirst()) it.getString(0) else "NORMAL" }
         val next = priorities[(priorities.indexOf(current).coerceAtLeast(0) + 1) % priorities.size]
         writableDatabase.execSQL(
-            "UPDATE capture_queue SET priority = ? WHERE id = ? AND state NOT IN ('SYNCED','FAILED','COMPLETED')",
+            """
+            UPDATE capture_queue SET priority = ?,
+                reschedule_requested = CASE WHEN state = 'SYNCED' THEN 1 ELSE reschedule_requested END
+            WHERE id = ? AND state NOT IN ('FAILED','COMPLETED')
+            """.trimIndent(),
             arrayOf<Any?>(next, id),
         )
     }
@@ -252,11 +268,12 @@ class CaptureQueueDatabase(context: Context) :
                 put("deadline", deadlineEpochMillis)
                 put("deadline_type", "HARD")
             }
+            put("reschedule_requested", 1)
         }
         writableDatabase.update(
             "capture_queue",
             values,
-            "id = ? AND state NOT IN ('SYNCED','FAILED','COMPLETED')",
+            "id = ? AND state NOT IN ('FAILED','COMPLETED')",
             arrayOf(id.toString()),
         )
     }
@@ -281,11 +298,14 @@ class CaptureQueueDatabase(context: Context) :
     fun updateActionTitle(id: Long, actionTitle: String) {
         val normalized = actionTitle.replace(Regex("\\s+"), " ").trim().take(60)
         if (normalized.isBlank()) return
-        val values = ContentValues().apply { put("action_title", normalized) }
+        val values = ContentValues().apply {
+            put("action_title", normalized)
+            put("reschedule_requested", 1)
+        }
         writableDatabase.update(
             "capture_queue",
             values,
-            "id = ? AND state NOT IN ('SYNCED','FAILED')",
+            "id = ? AND state NOT IN ('FAILED','COMPLETED')",
             arrayOf(id.toString()),
         )
     }
@@ -360,8 +380,12 @@ class CaptureQueueDatabase(context: Context) :
 
     fun unscheduled(limit: Int = 20): List<UnscheduledCapture> = readableDatabase.query(
         "capture_queue",
-        arrayOf("id", "dedup_key", "google_task_id", "deadline", "effort", "priority", "recovery_count"),
-        "state = 'SYNCED' AND google_task_id IS NOT NULL AND calendar_event_id IS NULL",
+        arrayOf(
+            "id", "dedup_key", "google_task_id", "deadline", "effort", "priority", "recovery_count",
+            "reschedule_requested", "scheduled_block_count",
+        ),
+        "state = 'SYNCED' AND google_task_id IS NOT NULL " +
+            "AND (calendar_event_id IS NULL OR reschedule_requested = 1)",
         null,
         null,
         null,
@@ -380,6 +404,8 @@ class CaptureQueueDatabase(context: Context) :
                         effortMinutes = effortMinutes(cursor.getString(4)),
                         priority = cursor.getString(5),
                         recoveryCount = cursor.getInt(6),
+                        rescheduleRequested = cursor.getInt(7) == 1,
+                        scheduledBlockCount = cursor.getInt(8),
                     ),
                 )
             }
@@ -406,6 +432,7 @@ class CaptureQueueDatabase(context: Context) :
         scheduledStart: Long,
         scheduledEnd: Long,
         scrubPayload: Boolean,
+        scheduledBlockCount: Int = 1,
     ) {
         val values = ContentValues().apply {
             put("state", "SYNCED")
@@ -413,6 +440,8 @@ class CaptureQueueDatabase(context: Context) :
             put("calendar_event_id", calendarEventId)
             put("scheduled_start", scheduledStart)
             put("scheduled_end", scheduledEnd)
+            put("scheduled_block_count", scheduledBlockCount)
+            put("reschedule_requested", 0)
             putNull("last_error_code")
             if (scrubPayload) {
                 put("title_cipher", ByteArray(0))
@@ -471,6 +500,20 @@ class CaptureQueueDatabase(context: Context) :
                 scheduled_end = NULL,
                 recovery_count = recovery_count + 1,
                 last_error_code = NULL
+            WHERE id = ? AND state = 'SYNCED'
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
+    fun beginRequestedReschedule(id: Long) {
+        writableDatabase.execSQL(
+            """
+            UPDATE capture_queue
+            SET calendar_event_id = NULL,
+                scheduled_start = NULL,
+                scheduled_end = NULL,
+                recovery_count = recovery_count + 1
             WHERE id = ? AND state = 'SYNCED'
             """.trimIndent(),
             arrayOf(id),
@@ -538,7 +581,7 @@ class CaptureQueueDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 6
+        const val DATABASE_VERSION = 7
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
     }
 }

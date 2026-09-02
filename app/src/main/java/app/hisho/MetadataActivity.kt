@@ -47,7 +47,7 @@ class MetadataActivity : Activity() {
             setTextColor(Color.rgb(24, 39, 34))
         })
         root.addView(TextView(this).apply {
-            text = "「未同期」の項目だけ、名前・工数・除外設定を変更できます。変更後は下の「今すぐ同期」を押してください。"
+            text = "未同期・同期済みタスクの名前、工数、優先度、期限を変更できます。同期済みの変更は「今すぐ同期」でCalendarへ再配置されます。"
             setPadding(0, 8.dp, 0, 16.dp)
         })
 
@@ -85,7 +85,7 @@ class MetadataActivity : Activity() {
                 setPadding(0, 8.dp, 0, 4.dp)
             })
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val editable = item.state !in setOf("SYNCED", "FAILED", "COMPLETED")
+            val editable = item.state !in setOf("FAILED", "COMPLETED")
             actions.addView(Button(this).apply {
                 text = "名前を編集"
                 isEnabled = editable
