@@ -75,6 +75,16 @@ class GoogleCalendarApi(private val accessToken: String) {
         }
     }
 
+    fun getEventOrNull(eventId: String): CalendarEvent? = try {
+        val response = request(
+            "GET",
+            "/calendar/v3/calendars/$PRIMARY_CALENDAR/events/${Uri.encode(eventId)}",
+        )
+        if (response.optString("status") == "cancelled") null else response.toEvent()
+    } catch (error: HttpFailure) {
+        if (error.status in setOf(404, 410)) null else throw error
+    }
+
     private fun JSONObject.toEvent(): CalendarEvent = CalendarEvent(
         id = getString("id"),
         start = Instant.parse(getJSONObject("start").getString("dateTime")),

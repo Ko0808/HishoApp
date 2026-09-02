@@ -77,7 +77,8 @@ class MetadataActivity : Activity() {
             })
             card.addView(TextView(this).apply {
                 text = "${item.category} / 優先度 ${priorityLabel(item.priority)}" +
-                    "\n期限: ${formatDeadline(item.deadlineEpochMillis)}\n判定: ${item.reason}"
+                    "\n期限: ${formatDeadline(item.deadlineEpochMillis)}\n判定: ${item.reason}" +
+                    errorDescription(item.lastErrorCode)
             })
             card.addView(TextView(this).apply {
                 text = item.actionTitle.ifBlank { "（旧データ：タイトル未保存）" }
@@ -224,6 +225,13 @@ class MetadataActivity : Activity() {
         "HIGH" -> "高"
         "LOW" -> "低"
         else -> "通常"
+    }
+
+    private fun errorDescription(errorCode: String?): String = when (errorCode) {
+        "calendar_event_missing" -> "\n要確認理由: Calendar予定が削除されています"
+        "recovery_limit" -> "\n要確認理由: 再計画の上限に達しました"
+        null -> ""
+        else -> "\nエラー: $errorCode"
     }
 
     private fun enqueueSync() {

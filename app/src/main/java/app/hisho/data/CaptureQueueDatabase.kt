@@ -59,6 +59,7 @@ class CaptureQueueDatabase(context: Context) :
         val startEpochMillis: Long,
         val endEpochMillis: Long,
     )
+    data class TrackedCalendarBlock(val captureId: Long, val calendarEventId: String)
     data class DashboardTask(
         val id: Long,
         val actionTitle: String,
@@ -80,6 +81,7 @@ class CaptureQueueDatabase(context: Context) :
         val reason: String,
         val actionTitle: String,
         val deadlineEpochMillis: Long?,
+        val lastErrorCode: String?,
     )
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -166,6 +168,9 @@ class CaptureQueueDatabase(context: Context) :
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN recovery_baseline INTEGER NOT NULL DEFAULT 0")
         }
         if (oldVersion < 9) createCalendarBlocksTable(db)
+        if (oldVersion < 10) {
+            db.execSQL("ALTER TABLE calendar_blocks ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0")
+        }
     }
 
     fun enqueue(notification: NormalizedNotification): Boolean {
@@ -213,7 +218,7 @@ class CaptureQueueDatabase(context: Context) :
         "capture_queue",
         arrayOf(
             "id", "source_package", "deadline_type", "effort", "priority",
-            "category", "state", "candidate_reason", "action_title", "deadline",
+            "category", "state", "candidate_reason", "action_title", "deadline", "last_error_code",
         ),
         null,
         null,
@@ -236,6 +241,7 @@ class CaptureQueueDatabase(context: Context) :
                         reason = cursor.getString(7),
                         actionTitle = cursor.getString(8),
                         deadlineEpochMillis = if (cursor.isNull(9)) null else cursor.getLong(9),
+                        lastErrorCode = if (cursor.isNull(10)) null else cursor.getString(10),
                     ),
                 )
             }
@@ -632,6 +638,68 @@ class CaptureQueueDatabase(context: Context) :
         )
     }
 
+    fun calendarBlocksToCheck(limit: Int = 20): List<TrackedCalendarBlock> = readableDatabase.rawQuery(
+        """
+        SELECT b.capture_queue_id, b.calendar_event_id
+        FROM calendar_blocks b
+        JOIN capture_queue q ON q.id = b.capture_queue_id
+        WHERE q.state = 'SYNCED'
+        ORDER BY b.checked_at ASC, b.start_at ASC
+        LIMIT ?
+        """.trimIndent(),
+        arrayOf(limit.toString()),
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(TrackedCalendarBlock(cursor.getLong(0), cursor.getString(1)))
+        }
+    }
+
+    fun updateCalendarBlock(captureId: Long, eventId: String, start: Long, end: Long) {
+        writableDatabase.beginTransaction()
+        try {
+            writableDatabase.update(
+                "calendar_blocks",
+                ContentValues().apply {
+                    put("start_at", start)
+                    put("end_at", end)
+                    put("checked_at", System.currentTimeMillis())
+                },
+                "capture_queue_id = ? AND calendar_event_id = ?",
+                arrayOf(captureId.toString(), eventId),
+            )
+            writableDatabase.execSQL(
+                """
+                UPDATE capture_queue
+                SET scheduled_start = (SELECT MIN(start_at) FROM calendar_blocks WHERE capture_queue_id = ?),
+                    scheduled_end = (SELECT MAX(end_at) FROM calendar_blocks WHERE capture_queue_id = ?)
+                WHERE id = ?
+                """.trimIndent(),
+                arrayOf(captureId, captureId, captureId),
+            )
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    fun markCalendarBlockMissing(captureId: Long, eventId: String) {
+        writableDatabase.update(
+            "calendar_blocks",
+            ContentValues().apply { put("checked_at", System.currentTimeMillis()) },
+            "capture_queue_id = ? AND calendar_event_id = ?",
+            arrayOf(captureId.toString(), eventId),
+        )
+        writableDatabase.update(
+            "capture_queue",
+            ContentValues().apply {
+                put("state", "NEEDS_ATTENTION")
+                put("last_error_code", "calendar_event_missing")
+            },
+            "id = ?",
+            arrayOf(captureId.toString()),
+        )
+    }
+
     fun dashboardTasks(limit: Int = 100): List<DashboardTask> = readableDatabase.query(
         "capture_queue",
         arrayOf(
@@ -702,6 +770,7 @@ class CaptureQueueDatabase(context: Context) :
                 calendar_event_id TEXT NOT NULL UNIQUE,
                 start_at INTEGER NOT NULL,
                 end_at INTEGER NOT NULL,
+                checked_at INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(capture_queue_id, block_index, generation)
             )
             """.trimIndent(),
@@ -713,7 +782,7 @@ class CaptureQueueDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 9
+        const val DATABASE_VERSION = 10
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
     }
 }

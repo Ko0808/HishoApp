@@ -47,6 +47,7 @@ class CaptureSyncWorker(
                 tasksApi.completeTask(taskListId, request.googleTaskId)
                 database.markCompleted(request.id)
             }
+            reconcileCalendarBlocks(calendarApi, database)
             database.pending().forEach { capture ->
                 syncCapture(tasksApi, calendarApi, scheduler, database, taskListId, capture)
             }
@@ -77,6 +78,22 @@ class CaptureSyncWorker(
         } catch (_: IOException) {
             statusStore.markNetworkError()
             Result.retry()
+        }
+    }
+
+    private fun reconcileCalendarBlocks(
+        calendarApi: GoogleCalendarApi,
+        database: CaptureQueueDatabase,
+    ) {
+        database.calendarBlocksToCheck().forEach { block ->
+            val event = calendarApi.getEventOrNull(block.calendarEventId)
+            if (event == null) database.markCalendarBlockMissing(block.captureId, block.calendarEventId)
+            else database.updateCalendarBlock(
+                block.captureId,
+                block.calendarEventId,
+                event.start.toEpochMilli(),
+                event.end.toEpochMilli(),
+            )
         }
     }
 
