@@ -49,7 +49,9 @@ class CaptureQueueDatabase(context: Context) :
         val googleTaskId: String,
         val scheduledEndEpochMillis: Long,
         val recoveryCount: Int,
+        val recoveryBaseline: Int,
     )
+    data class CompletionRequest(val id: Long, val googleTaskId: String)
     data class DashboardTask(
         val id: Long,
         val actionTitle: String,
@@ -107,7 +109,8 @@ class CaptureQueueDatabase(context: Context) :
                 recovery_count INTEGER NOT NULL DEFAULT 0,
                 completed_at INTEGER,
                 reschedule_requested INTEGER NOT NULL DEFAULT 0,
-                scheduled_block_count INTEGER NOT NULL DEFAULT 1
+                scheduled_block_count INTEGER NOT NULL DEFAULT 1,
+                recovery_baseline INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent(),
         )
@@ -150,6 +153,9 @@ class CaptureQueueDatabase(context: Context) :
         if (oldVersion < 7) {
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN reschedule_requested INTEGER NOT NULL DEFAULT 0")
             db.execSQL("ALTER TABLE capture_queue ADD COLUMN scheduled_block_count INTEGER NOT NULL DEFAULT 1")
+        }
+        if (oldVersion < 8) {
+            db.execSQL("ALTER TABLE capture_queue ADD COLUMN recovery_baseline INTEGER NOT NULL DEFAULT 0")
         }
     }
 
@@ -470,7 +476,7 @@ class CaptureQueueDatabase(context: Context) :
     fun recoveryCandidates(endedBeforeEpochMillis: Long, limit: Int = 20): List<RecoveryCandidate> =
         readableDatabase.query(
             "capture_queue",
-            arrayOf("id", "google_task_id", "scheduled_end", "recovery_count"),
+            arrayOf("id", "google_task_id", "scheduled_end", "recovery_count", "recovery_baseline"),
             "state = 'SYNCED' AND google_task_id IS NOT NULL AND scheduled_end IS NOT NULL " +
                 "AND scheduled_end < ?",
             arrayOf(endedBeforeEpochMillis.toString()),
@@ -481,7 +487,12 @@ class CaptureQueueDatabase(context: Context) :
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    add(RecoveryCandidate(cursor.getLong(0), cursor.getString(1), cursor.getLong(2), cursor.getInt(3)))
+                    add(
+                        RecoveryCandidate(
+                            cursor.getLong(0), cursor.getString(1), cursor.getLong(2),
+                            cursor.getInt(3), cursor.getInt(4),
+                        ),
+                    )
                 }
             }
         }
@@ -500,6 +511,40 @@ class CaptureQueueDatabase(context: Context) :
             put("last_error_code", "recovery_limit")
         }
         writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun restartRecovery(id: Long) {
+        writableDatabase.execSQL(
+            """
+            UPDATE capture_queue
+            SET state = 'SYNCED', recovery_baseline = recovery_count,
+                reschedule_requested = 1, last_error_code = NULL
+            WHERE id = ? AND state = 'NEEDS_ATTENTION'
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
+    fun requestCompletion(id: Long) {
+        writableDatabase.execSQL(
+            """
+            UPDATE capture_queue SET state = 'COMPLETE_REQUESTED', last_error_code = NULL
+            WHERE id = ? AND google_task_id IS NOT NULL
+                AND state IN ('SYNCED','NEEDS_ATTENTION')
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
+    fun completionRequests(limit: Int = 20): List<CompletionRequest> = readableDatabase.query(
+        "capture_queue",
+        arrayOf("id", "google_task_id"),
+        "state = 'COMPLETE_REQUESTED' AND google_task_id IS NOT NULL",
+        null, null, null, "created_at ASC", limit.toString(),
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(CompletionRequest(cursor.getLong(0), cursor.getString(1)))
+        }
     }
 
     fun markForReschedule(id: Long) {
@@ -592,7 +637,7 @@ class CaptureQueueDatabase(context: Context) :
 
     private companion object {
         const val DATABASE_NAME = "hisho_capture.db"
-        const val DATABASE_VERSION = 7
+        const val DATABASE_VERSION = 8
         const val IGNORED_RETENTION_MILLIS = 7 * 24 * 60 * 60 * 1_000L
     }
 }

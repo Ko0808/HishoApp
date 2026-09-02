@@ -85,7 +85,9 @@ class MetadataActivity : Activity() {
                 setPadding(0, 8.dp, 0, 4.dp)
             })
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val editable = item.state !in setOf("FAILED", "COMPLETED", "NEEDS_ATTENTION")
+            val editable = item.state !in setOf(
+                "FAILED", "COMPLETED", "NEEDS_ATTENTION", "COMPLETE_REQUESTED",
+            )
             actions.addView(Button(this).apply {
                 text = "名前を編集"
                 isEnabled = editable
@@ -101,7 +103,7 @@ class MetadataActivity : Activity() {
             })
             actions.addView(Button(this).apply {
                 text = if (item.state == "IGNORED") "タスク化" else "除外"
-                isEnabled = item.state !in setOf("SYNCED", "FAILED")
+                isEnabled = item.state in setOf("PENDING", "RETRY", "IGNORED")
                 setOnClickListener {
                     database.toggleCandidate(item.id)
                     enqueueSync()
@@ -132,6 +134,35 @@ class MetadataActivity : Activity() {
                 }
             })
             card.addView(metadataActions)
+            if (item.state == "NEEDS_ATTENTION") {
+                val recoveryActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                recoveryActions.addView(Button(this).apply {
+                    text = "再計画を再開"
+                    setOnClickListener {
+                        database.restartRecovery(item.id)
+                        enqueueSync()
+                        render()
+                    }
+                })
+                recoveryActions.addView(Button(this).apply {
+                    text = "完了にする"
+                    setOnClickListener {
+                        database.requestCompletion(item.id)
+                        enqueueSync()
+                        render()
+                    }
+                })
+                card.addView(recoveryActions)
+            } else if (item.state == "SYNCED") {
+                card.addView(Button(this).apply {
+                    text = "完了にする"
+                    setOnClickListener {
+                        database.requestCompletion(item.id)
+                        enqueueSync()
+                        render()
+                    }
+                })
+            }
             root.addView(card, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -220,6 +251,7 @@ class MetadataActivity : Activity() {
         "IGNORED" -> "除外"
         "FAILED" -> "同期失敗"
         "NEEDS_ATTENTION" -> "要確認（再計画上限）"
+        "COMPLETE_REQUESTED" -> "完了を同期中"
         else -> state
     }
 
@@ -229,6 +261,7 @@ class MetadataActivity : Activity() {
         "COMPLETED" -> Color.rgb(58, 91, 160)
         "FAILED" -> Color.rgb(168, 62, 48)
         "NEEDS_ATTENTION" -> Color.rgb(168, 62, 48)
+        "COMPLETE_REQUESTED" -> Color.rgb(58, 91, 160)
         else -> Color.rgb(80, 86, 82)
     }
 

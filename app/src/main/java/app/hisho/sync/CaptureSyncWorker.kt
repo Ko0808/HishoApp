@@ -43,6 +43,10 @@ class CaptureSyncWorker(
 
         return try {
             val taskListId = tasksApi.findOrCreateTaskList(TASK_LIST_TITLE)
+            database.completionRequests().forEach { request ->
+                tasksApi.completeTask(taskListId, request.googleTaskId)
+                database.markCompleted(request.id)
+            }
             database.pending().forEach { capture ->
                 syncCapture(tasksApi, calendarApi, scheduler, database, taskListId, capture)
             }

@@ -90,6 +90,14 @@ class GoogleTasksApi(private val accessToken: String) {
         )
     }
 
+    fun completeTask(taskListId: String, taskId: String) {
+        request(
+            "PATCH",
+            "/tasks/v1/lists/${Uri.encode(taskListId)}/tasks/${Uri.encode(taskId)}",
+            JSONObject().put("status", "completed").put("completed", java.time.Instant.now().toString()),
+        )
+    }
+
     private fun request(method: String, path: String, body: JSONObject? = null): JSONObject {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = method

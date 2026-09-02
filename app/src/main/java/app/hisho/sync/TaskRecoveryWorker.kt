@@ -31,7 +31,7 @@ class TaskRecoveryWorker(context: Context, params: WorkerParameters) : Coroutine
             database.recoveryCandidates(cutoff).forEach { candidate ->
                 val task = tasksApi.getTask(taskListId, candidate.googleTaskId)
                 if (task.completed) database.markCompleted(candidate.id)
-                else if (candidate.recoveryCount >= maximumAttempts) {
+                else if (candidate.recoveryCount - candidate.recoveryBaseline >= maximumAttempts) {
                     database.markNeedsAttention(candidate.id)
                 }
                 else {
