@@ -23,6 +23,7 @@ class TaskRecoveryWorker(context: Context, params: WorkerParameters) : Coroutine
         } ?: return Result.success()
         val database = CaptureQueueDatabase(applicationContext)
         val tasksApi = GoogleTasksApi(token)
+        val maximumAttempts = RecoveryPreferences(applicationContext).maximumAttempts
         return try {
             val taskListId = tasksApi.findOrCreateTaskList(TASK_LIST_TITLE)
             val cutoff = System.currentTimeMillis() - GRACE_PERIOD_MILLIS
@@ -30,6 +31,9 @@ class TaskRecoveryWorker(context: Context, params: WorkerParameters) : Coroutine
             database.recoveryCandidates(cutoff).forEach { candidate ->
                 val task = tasksApi.getTask(taskListId, candidate.googleTaskId)
                 if (task.completed) database.markCompleted(candidate.id)
+                else if (candidate.recoveryCount >= maximumAttempts) {
+                    database.markNeedsAttention(candidate.id)
+                }
                 else {
                     database.markForReschedule(candidate.id)
                     needsScheduling = true

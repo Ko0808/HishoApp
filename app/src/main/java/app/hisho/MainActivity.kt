@@ -170,6 +170,14 @@ class MainActivity : Activity() {
             }
         })
         val recoveryPreferences = RecoveryPreferences(this)
+        val recoveryLimitButton = Button(this).apply {
+            text = "再計画の上限 ${recoveryPreferences.maximumAttempts}回"
+        }
+        recoveryLimitButton.setOnClickListener {
+            recoveryPreferences.cycleMaximumAttempts()
+            recoveryLimitButton.text = "再計画の上限 ${recoveryPreferences.maximumAttempts}回"
+        }
+        root.addView(recoveryLimitButton, matchWidth())
         root.addView(CheckBox(this).apply {
             text = "予定終了後も未完了なら自動で再配置"
             isChecked = recoveryPreferences.enabled
@@ -206,6 +214,7 @@ class MainActivity : Activity() {
         metrics.text = buildString {
             append("同期待ち ${stats.pending}件  •  重複除外 ${stats.duplicates}件")
             append("\n時間配置 ${stats.scheduled}件  •  広告除外 ${stats.ignored}件  •  失敗 ${stats.failed}件")
+            if (stats.needsAttention > 0) append("\n要確認 ${stats.needsAttention}件")
         }
         googleStatus.text = if (EncryptedAuthStore(this).isConnected()) {
             "接続済み — Auto Captured Tasksへ同期します\n${syncStatusText()}"

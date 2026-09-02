@@ -19,6 +19,7 @@ class CaptureQueueDatabase(context: Context) :
         val failed: Int,
         val ignored: Int,
         val scheduled: Int,
+        val needsAttention: Int,
     )
     data class PendingCapture(
         val id: Long,
@@ -47,6 +48,7 @@ class CaptureQueueDatabase(context: Context) :
         val id: Long,
         val googleTaskId: String,
         val scheduledEndEpochMillis: Long,
+        val recoveryCount: Int,
     )
     data class DashboardTask(
         val id: Long,
@@ -332,6 +334,7 @@ class CaptureQueueDatabase(context: Context) :
         failed = count("state = 'FAILED'"),
         ignored = count("state = 'IGNORED'"),
         scheduled = count("calendar_event_id IS NOT NULL"),
+        needsAttention = count("state = 'NEEDS_ATTENTION'"),
     )
 
     fun pending(limit: Int = 20): List<PendingCapture> {
@@ -467,7 +470,7 @@ class CaptureQueueDatabase(context: Context) :
     fun recoveryCandidates(endedBeforeEpochMillis: Long, limit: Int = 20): List<RecoveryCandidate> =
         readableDatabase.query(
             "capture_queue",
-            arrayOf("id", "google_task_id", "scheduled_end"),
+            arrayOf("id", "google_task_id", "scheduled_end", "recovery_count"),
             "state = 'SYNCED' AND google_task_id IS NOT NULL AND scheduled_end IS NOT NULL " +
                 "AND scheduled_end < ?",
             arrayOf(endedBeforeEpochMillis.toString()),
@@ -478,7 +481,7 @@ class CaptureQueueDatabase(context: Context) :
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    add(RecoveryCandidate(cursor.getLong(0), cursor.getString(1), cursor.getLong(2)))
+                    add(RecoveryCandidate(cursor.getLong(0), cursor.getString(1), cursor.getLong(2), cursor.getInt(3)))
                 }
             }
         }
@@ -487,6 +490,14 @@ class CaptureQueueDatabase(context: Context) :
         val values = ContentValues().apply {
             put("state", "COMPLETED")
             put("completed_at", System.currentTimeMillis())
+        }
+        writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun markNeedsAttention(id: Long) {
+        val values = ContentValues().apply {
+            put("state", "NEEDS_ATTENTION")
+            put("last_error_code", "recovery_limit")
         }
         writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
     }

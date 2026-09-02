@@ -85,7 +85,7 @@ class MetadataActivity : Activity() {
                 setPadding(0, 8.dp, 0, 4.dp)
             })
             val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val editable = item.state !in setOf("FAILED", "COMPLETED")
+            val editable = item.state !in setOf("FAILED", "COMPLETED", "NEEDS_ATTENTION")
             actions.addView(Button(this).apply {
                 text = "名前を編集"
                 isEnabled = editable
@@ -219,6 +219,7 @@ class MetadataActivity : Activity() {
         "COMPLETED" -> "完了"
         "IGNORED" -> "除外"
         "FAILED" -> "同期失敗"
+        "NEEDS_ATTENTION" -> "要確認（再計画上限）"
         else -> state
     }
 
@@ -227,6 +228,7 @@ class MetadataActivity : Activity() {
         "SYNCED" -> Color.rgb(28, 112, 76)
         "COMPLETED" -> Color.rgb(58, 91, 160)
         "FAILED" -> Color.rgb(168, 62, 48)
+        "NEEDS_ATTENTION" -> Color.rgb(168, 62, 48)
         else -> Color.rgb(80, 86, 82)
     }
 
