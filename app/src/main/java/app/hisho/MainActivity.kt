@@ -24,6 +24,7 @@ import androidx.work.NetworkType
 import androidx.work.WorkManager
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.auth.GoogleTasksAuthorization
+import app.hisho.ai.AiPreferences
 import app.hisho.capture.CapturePreferences
 import app.hisho.capture.HishoNotificationListener
 import app.hisho.data.CaptureQueueDatabase
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
     private lateinit var authorization: GoogleTasksAuthorization
     private lateinit var schedulingSummary: TextView
     private lateinit var todaySummary: TextView
+    private lateinit var aiStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -131,6 +133,14 @@ class MainActivity : Activity() {
         root.addView(Button(this).apply {
             text = "タスク推定を確認・修正"
             setOnClickListener { startActivity(Intent(this@MainActivity, MetadataActivity::class.java)) }
+        }, matchWidth())
+
+        root.addView(section("AI支援"))
+        aiStatus = TextView(this).apply { textSize = 16f }
+        root.addView(aiStatus)
+        root.addView(Button(this).apply {
+            text = "AI支援を設定"
+            setOnClickListener { startActivity(Intent(this@MainActivity, AiSettingsActivity::class.java)) }
         }, matchWidth())
 
         root.addView(section("自動スケジュール"))
@@ -271,6 +281,12 @@ class MainActivity : Activity() {
             "接続済み — Auto Captured Tasksへ同期します\n${syncStatusText()}"
         } else {
             "未接続"
+        }
+        val aiPreferences = AiPreferences(this)
+        aiStatus.text = if (aiPreferences.isReady()) {
+            "有効 — 匿名メタデータのみ送信\n${aiPreferences.lastStatus}"
+        } else {
+            "無効 — タスク内容は外部AIへ送信されません"
         }
         renderToday()
     }

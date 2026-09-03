@@ -5,6 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.auth.GoogleTasksTokenProvider
+import app.hisho.ai.OpenAiSchedulingAdvisor
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.intelligence.ActionTitleGenerator
 import app.hisho.scheduling.DeterministicScheduler
@@ -55,7 +56,7 @@ class CaptureSyncWorker(
                 database.markCompleted(request.id)
             }
             reconcileCalendarBlocks(calendarApi, database)
-            database.pending().forEach { capture ->
+            OpenAiSchedulingAdvisor(applicationContext).prioritize(database.pending()).forEach { capture ->
                 syncCapture(tasksApi, calendarApi, scheduler, database, taskListId, capture)
             }
             database.unscheduled().forEach { capture ->

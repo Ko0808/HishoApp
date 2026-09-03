@@ -32,7 +32,9 @@ class CaptureQueueDatabase(context: Context) :
         val body: String,
         val actionTitle: String,
         val priority: String,
+        val category: String,
         val recoveryCount: Int,
+        val createdAtEpochMillis: Long,
     )
     data class UnscheduledCapture(
         val id: Long,
@@ -441,7 +443,7 @@ class CaptureQueueDatabase(context: Context) :
             "capture_queue",
             arrayOf(
                 "id", "dedup_key", "source_package", "deadline", "effort", "action_title", "priority",
-                "recovery_count",
+                "category", "recovery_count", "created_at",
                 "title_cipher", "title_nonce", "body_cipher", "body_nonce",
             ),
             "state IN ('PENDING','RETRY')",
@@ -455,10 +457,10 @@ class CaptureQueueDatabase(context: Context) :
             buildList {
                 while (cursor.moveToNext()) {
                     val title = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(6), cursor.getBlob(7)),
+                            EncryptedPayloadStore.EncryptedValue(cursor.getBlob(10), cursor.getBlob(11)),
                     )
                     val body = crypto.decrypt(
-                        EncryptedPayloadStore.EncryptedValue(cursor.getBlob(8), cursor.getBlob(9)),
+                            EncryptedPayloadStore.EncryptedValue(cursor.getBlob(12), cursor.getBlob(13)),
                     )
                     add(
                         PendingCapture(
@@ -471,7 +473,9 @@ class CaptureQueueDatabase(context: Context) :
                             body = body,
                             actionTitle = cursor.getString(5),
                             priority = cursor.getString(6),
-                            recoveryCount = cursor.getInt(7),
+                            category = cursor.getString(7),
+                            recoveryCount = cursor.getInt(8),
+                            createdAtEpochMillis = cursor.getLong(9),
                         ),
                     )
                 }

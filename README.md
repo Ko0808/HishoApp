@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.24.0` (`versionCode 26`)
+**Current version / 現在のバージョン:** `0.25.0` (`versionCode 27`)
 
 ---
 
@@ -51,6 +51,9 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 - 分単位で変更できる休憩開始・終了時刻
 - 未完了タスクの自動再配置、再計画上限、要確認状態
 - 要確認タスクの再開とGoogle Tasksへの完了同期
+- 明示同意と暗号化APIキーによる任意のAIスケジューリング
+- タイトル・本文・送信者・通知元を除外した匿名メタデータMapper
+- AIによる同期前の優先順位・期限リスク評価と、障害時の端末内スケジューラへの自動フォールバック
 
 ### 標準のスケジュール設定
 
@@ -101,6 +104,8 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 5. 必要なら「タスク推定を確認・修正」で編集します。
 6. 「今すぐ同期」を押すか、バックグラウンド同期を待ちます。
 
+AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を確認し、OpenAI APIキーを保存して明示的に同意した場合のみ有効になります。APIキーはAndroid Keystoreの鍵で暗号化されます。
+
 ### 推奨する実機検証
 
 1. 対応アプリから通知を発生させ、同一通知の更新が重複しないことを確認します。
@@ -111,6 +116,7 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 6. 同期済みタスクを編集し、以前の枠が整理されて再配置されることを確認します。
 7. 自動再配置を有効にし、未完了タスクが予定終了後に移動することを確認します。
 8. 再計画上限で「要確認」になり、再開または完了にできることを確認します。
+9. AI支援を有効にし、複数の同期待ちタスクでAI適用状態が表示されること、通信失敗時も通常同期が継続することを確認します。
 
 ### プライバシーと安全性
 
@@ -130,7 +136,7 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 - 通知形式の違いにより、タイトル・期限・工数の推定が誤る場合があります。
 - 祝日と希望時間帯は未対応です。
 - アカウント切断、OAuth権限取り消し、全データ削除UIは未実装です。
-- AIによる意味的な要約・推定・タスク分解は未実装です。
+- タイトルや本文をAIへ送る意味的な要約・推定・タスク分解は、プライバシー設計確定まで未実装です。
 
 ### 今後の計画
 
@@ -139,7 +145,7 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 3. アカウント切断、OAuth権限取り消し、データ削除
 4. DB移行、API、オフライン、大量通知、バッテリー試験
 5. 本番署名、プライバシーポリシー、Google Play公開対応
-6. 同意と匿名化を前提にした任意のAI支援
+6. 同意を前提にした本文AI処理とタスク分解（現在は匿名スケジューリングのみ）
 
 ---
 
@@ -186,6 +192,9 @@ Notification content is not currently sent to an external AI service.
 - Custom break start and end times with minute precision
 - Optional unfinished-task recovery with configurable limits
 - Restart and Google Tasks completion actions for items needing attention
+- Optional AI scheduling with explicit consent and an encrypted API key
+- An anonymous metadata mapper that excludes titles, bodies, senders, and notification sources
+- AI ordering and deadline-risk prioritization before sync, with automatic deterministic fallback
 
 ### Default scheduling settings
 
@@ -235,6 +244,8 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 5. Optionally review and edit the inferred task.
 6. Select **Sync now** or wait for background synchronization.
 
+AI assistance is off by default. It is enabled only after reviewing the transmitted fields, saving an OpenAI API key, and explicitly consenting in **AI assistance settings**. The API key is encrypted with an Android Keystore-backed key.
+
 ### Recommended device validation
 
 1. Generate supported-app notifications and verify duplicate updates are ignored.
@@ -245,6 +256,7 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 6. Edit a synced task and verify its prior blocks are replaced by a new schedule.
 7. Enable recovery and verify an unfinished task moves after its scheduled end.
 8. Verify a task exceeding its limit becomes **Needs attention** and can be restarted or completed.
+9. Enable AI assistance, verify the AI-applied status with multiple pending tasks, and confirm normal synchronization continues when the AI request fails.
 
 ### Privacy and safety
 
@@ -264,7 +276,7 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 - Notification-format differences can cause incorrect title, deadline, or effort inference.
 - Public holidays and preferred time windows are unsupported.
 - Account disconnect, OAuth revocation, and full data-deletion controls are not implemented.
-- AI-assisted semantic summarization, estimation, and decomposition are not implemented.
+- Content-based AI summarization, estimation, and decomposition remain disabled until their privacy design is finalized.
 
 ### Roadmap
 
@@ -273,4 +285,4 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 3. Add account disconnect, OAuth revocation, and data-deletion controls.
 4. Expand migration, API, offline, load, and battery testing.
 5. Add production signing, privacy documentation, and Google Play release readiness.
-6. Optionally add consent-based, privacy-preserving AI assistance.
+6. Optionally add consent-based content processing and task decomposition (anonymous scheduling is implemented).
