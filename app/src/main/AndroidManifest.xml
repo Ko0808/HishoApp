@@ -18,6 +18,11 @@
         </activity>
 
         <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="設定" />
+
+        <activity
             android:name=".MetadataActivity"
             android:exported="false"
             android:label="タスク推定の修正" />

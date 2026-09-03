@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.26.0` (`versionCode 28`)
+**Current version / 現在のバージョン:** `0.27.0` (`versionCode 29`)
 
 ---
 
@@ -41,7 +41,9 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 - Lを60分×2、XLを60分×4に分割
 - 分割した各Calendar枠のイベントID、順番、時刻、再計画世代を永続追跡
 - Calendar側で移動した追跡対象枠の時刻をHishoへ反映し、削除時は要確認として停止
-- 今日の予定、次の予定、締切注意、同期状態の表示
+- 次のタスク、自動運転状態、対応が必要な問題だけに絞ったホーム画面
+- 締切危険・同期失敗・要確認・同期待ちからタスク確認へ進む導線
+- Google Calendarを直接開く操作と、運用項目を集約した設定画面
 - タスク状態の絞り込みとタスク名・通知元の検索
 - 確認付きのタスク削除とGoogle Tasks・追跡Calendar枠の連動削除
 - 通知元、状態、期限、配置、再計画回数、全Calendar枠を確認できるタスク詳細
@@ -99,9 +101,9 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 
 ### 初回セットアップ
 
-1. Hishoを起動し、「通知へのアクセスを設定」から許可します。
-2. 取得対象のアプリを選択します。
-3. 「Googleアカウントを接続」からTasksとCalendarへのアクセスを許可します。
+1. Hishoを起動し、「設定」から通知へのアクセスを許可します。
+2. 設定画面で取得対象のアプリを選択します。
+3. 設定画面からGoogleアカウントを接続し、TasksとCalendarへのアクセスを許可します。
 4. 通知受信後、「端末内キュー」で同期待ち件数を確認します。
 5. 必要なら「タスク推定を確認・修正」で編集します。
 6. 「今すぐ同期」を押すか、バックグラウンド同期を待ちます。
@@ -185,7 +187,9 @@ Notification content is not currently sent to an external AI service.
 - Two 60-minute blocks for L and four blocks for XL tasks
 - Persistent event ID, order, time, and generation tracking for every split Calendar block
 - Calendar-side time changes are imported for tracked blocks; deleted blocks stop in Needs attention
-- Today, next-task, deadline-risk, and synchronization-status summaries
+- A calm home screen focused on the next task, automation health, and actionable problems
+- Direct task-review paths for deadline risk, sync failures, attention items, and pending work
+- Direct Google Calendar access with operational controls consolidated in Settings
 - Task-state filters and title/source search
 - Confirmed task deletion synchronized with Google Tasks and all tracked Calendar blocks
 - Task details covering source, state, deadline, schedule, recovery count, and every Calendar block
