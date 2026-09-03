@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.25.0` (`versionCode 27`)
+**Current version / 現在のバージョン:** `0.26.0` (`versionCode 28`)
 
 ---
 
@@ -54,6 +54,8 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 - 明示同意と暗号化APIキーによる任意のAIスケジューリング
 - タイトル・本文・送信者・通知元を除外した匿名メタデータMapper
 - AIによる同期前の優先順位・期限リスク評価と、障害時の端末内スケジューラへの自動フォールバック
+- Calendar Free/Busyから生成した匿名の日別空き分数による過密日判断
+- AIが提案する25／30／45／60分単位での長時間タスク分割
 
 ### 標準のスケジュール設定
 
@@ -116,7 +118,8 @@ AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を�
 6. 同期済みタスクを編集し、以前の枠が整理されて再配置されることを確認します。
 7. 自動再配置を有効にし、未完了タスクが予定終了後に移動することを確認します。
 8. 再計画上限で「要確認」になり、再開または完了にできることを確認します。
-9. AI支援を有効にし、複数の同期待ちタスクでAI適用状態が表示されること、通信失敗時も通常同期が継続することを確認します。
+9. AI支援を有効にし、複数の同期待ちタスクでAI適用・過密状態が表示されること、長時間タスクが提案された長さに分割されることを確認します。
+10. AI通信を失敗させても、通常の優先順と最大60分の分割で同期が継続することを確認します。
 
 ### プライバシーと安全性
 
@@ -145,7 +148,7 @@ AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を�
 3. アカウント切断、OAuth権限取り消し、データ削除
 4. DB移行、API、オフライン、大量通知、バッテリー試験
 5. 本番署名、プライバシーポリシー、Google Play公開対応
-6. 同意を前提にした本文AI処理とタスク分解（現在は匿名スケジューリングのみ）
+6. 同意を前提にした本文AI処理（現在は匿名スケジューリング・過密判断・分割提案まで実装済み）
 
 ---
 
@@ -195,6 +198,8 @@ Notification content is not currently sent to an external AI service.
 - Optional AI scheduling with explicit consent and an encrypted API key
 - An anonymous metadata mapper that excludes titles, bodies, senders, and notification sources
 - AI ordering and deadline-risk prioritization before sync, with automatic deterministic fallback
+- Overloaded-day detection using anonymous daily free-minute totals derived from Calendar Free/Busy
+- AI-selected 25/30/45/60-minute maximum blocks for long tasks
 
 ### Default scheduling settings
 
@@ -256,7 +261,8 @@ AI assistance is off by default. It is enabled only after reviewing the transmit
 6. Edit a synced task and verify its prior blocks are replaced by a new schedule.
 7. Enable recovery and verify an unfinished task moves after its scheduled end.
 8. Verify a task exceeding its limit becomes **Needs attention** and can be restarted or completed.
-9. Enable AI assistance, verify the AI-applied status with multiple pending tasks, and confirm normal synchronization continues when the AI request fails.
+9. Enable AI assistance and verify its applied/overloaded status and suggested block lengths with multiple pending tasks.
+10. Force an AI request failure and confirm synchronization continues with deterministic ordering and 60-minute blocks.
 
 ### Privacy and safety
 
@@ -285,4 +291,4 @@ AI assistance is off by default. It is enabled only after reviewing the transmit
 3. Add account disconnect, OAuth revocation, and data-deletion controls.
 4. Expand migration, API, offline, load, and battery testing.
 5. Add production signing, privacy documentation, and Google Play release readiness.
-6. Optionally add consent-based content processing and task decomposition (anonymous scheduling is implemented).
+6. Optionally add consent-based content processing (anonymous scheduling, load detection, and block suggestions are implemented).

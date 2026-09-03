@@ -6,6 +6,7 @@ import androidx.work.WorkerParameters
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.auth.GoogleTasksTokenProvider
 import app.hisho.ai.OpenAiSchedulingAdvisor
+import app.hisho.ai.AnonymousAvailabilityCalculator
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.intelligence.ActionTitleGenerator
 import app.hisho.scheduling.DeterministicScheduler
@@ -40,7 +41,8 @@ class CaptureSyncWorker(
         val database = CaptureQueueDatabase(applicationContext)
         val tasksApi = GoogleTasksApi(token)
         val calendarApi = GoogleCalendarApi(token)
-        val scheduler = SchedulingPreferences(applicationContext).scheduler()
+        val schedulingPreferences = SchedulingPreferences(applicationContext)
+        val scheduler = schedulingPreferences.scheduler()
 
         return try {
             val taskListId = tasksApi.findOrCreateTaskList(TASK_LIST_TITLE)
@@ -56,8 +58,21 @@ class CaptureSyncWorker(
                 database.markCompleted(request.id)
             }
             reconcileCalendarBlocks(calendarApi, database)
-            OpenAiSchedulingAdvisor(applicationContext).prioritize(database.pending()).forEach { capture ->
-                syncCapture(tasksApi, calendarApi, scheduler, database, taskListId, capture)
+            val pending = database.pending()
+            val advisor = OpenAiSchedulingAdvisor(applicationContext)
+            val availability = if (advisor.isEnabled() && pending.isNotEmpty()) {
+                val now = Instant.now()
+                AnonymousAvailabilityCalculator.calculate(
+                    schedulingPreferences,
+                    calendarApi.busyIntervals(now, now.plus(8, ChronoUnit.DAYS), ZoneId.systemDefault()),
+                    now,
+                )
+            } else emptyList()
+            advisor.plan(pending, availability).forEach { planned ->
+                syncCapture(
+                    tasksApi, calendarApi, scheduler, database, taskListId,
+                    planned.capture, planned.maximumBlockMinutes,
+                )
             }
             database.unscheduled().forEach { capture ->
                 scheduleExisting(tasksApi, calendarApi, scheduler, database, taskListId, capture)
@@ -112,6 +127,7 @@ class CaptureSyncWorker(
         database: CaptureQueueDatabase,
         taskListId: String,
         capture: CaptureQueueDatabase.PendingCapture,
+        maximumBlockMinutes: Int,
     ) {
         val marker = "Hisho capture: ${capture.dedupKey}"
         try {
@@ -142,6 +158,7 @@ class CaptureSyncWorker(
                 capture.effortMinutes,
                 capture.deadlineEpochMillis,
                 capture.recoveryCount,
+                maximumBlockMinutes,
             )
             database.markScheduled(
                 capture.id,
@@ -249,8 +266,9 @@ class CaptureSyncWorker(
         effortMinutes: Int,
         deadlineEpochMillis: Long?,
         recoveryCount: Int,
+        maximumBlockMinutes: Int = 60,
     ): List<GoogleCalendarApi.CalendarEvent> {
-        val blocks = TaskBlockPlanner.split(effortMinutes)
+        val blocks = TaskBlockPlanner.split(effortMinutes, maximumBlockMinutes)
         val events = mutableListOf<GoogleCalendarApi.CalendarEvent>()
         blocks.forEachIndexed { index, blockMinutes ->
             val blockId = "$captureId:recovery:$recoveryCount:block:${index + 1}"
