@@ -12,6 +12,16 @@ import androidx.core.view.WindowInsetsCompat
 
 /** Presentation only: existing screen actions and navigation destinations remain unchanged. */
 open class GlassActivity : Activity() {
+    override fun onResume() {
+        super.onResume()
+        if (!HishoDesign.motion(this)) {
+            fun stopMotion(view: View) {
+                view.stateListAnimator = null
+                if (view is ViewGroup) for (i in 0 until view.childCount) stopMotion(view.getChildAt(i))
+            }
+            stopMotion(window.decorView)
+        }
+    }
     override fun setContentView(view: View) {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
@@ -24,17 +34,22 @@ open class GlassActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             background = GlassBackdrop()
         }
-        if (this !is app.hisho.MainActivity) {
-            shell.addView(Button(this).apply {
-                text = "‹  戻る"
-                contentDescription = "前の画面へ戻る"
-                setOnClickListener { finish() }
-            }, LinearLayout.LayoutParams(GlassUi.dp(this, 112), ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                leftMargin = GlassUi.dp(this@GlassActivity, 20)
-                topMargin = GlassUi.dp(this@GlassActivity, 8)
-                bottomMargin = GlassUi.dp(this@GlassActivity, 4)
-            })
+        val toolbar = LinearLayout(this).apply {
+            tag = HishoDesign.OWNED; orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(GlassUi.dp(context, 16), GlassUi.dp(context, 4), GlassUi.dp(context, 16), 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xEFFFFFFF.toInt()); cornerRadius = GlassUi.dp(context, 24).toFloat()
+            }
         }
+        if (this !is app.hisho.MainActivity) toolbar.addView(HishoDesign.button(this, "‹ 戻る") { finish() }.apply {
+            contentDescription = "前の画面へ戻る"
+        }) else toolbar.addView(HishoDesign.text(this, "Hisho", 18f, true))
+        toolbar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        if (this is app.hisho.MainActivity) toolbar.addView(HishoDesign.button(this, "設定") {
+            startActivity(android.content.Intent(this, app.hisho.SettingsActivity::class.java))
+        })
+        shell.addView(toolbar)
         shell.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         ViewCompat.setOnApplyWindowInsetsListener(shell) { target, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())

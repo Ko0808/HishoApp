@@ -19,7 +19,7 @@ class FilterSettingsActivity : app.hisho.ui.GlassActivity() {
         root.addView(TextView(this).apply { text = "除外 → 最優先登録 → AIの順です。競合時は除外します。ワードはタイトル・本文の部分一致（英字大小・全角半角を区別しない）。各行に1ワードを入力してください。保存後の判定から適用し、登録済みタスクは削除しません。" })
         inputs = listOf("excluded_words" to "除外ワード", "forced_words" to "最優先に登録するワード").map { (key, label) ->
             root.addView(TextView(this).apply { text = label; textSize = 19f })
-            key to EditText(this).apply { minLines = 2; maxLines = 4; setText(savedInstanceState?.getString(key) ?: preferences.value(key)); root.addView(this) }
+            key to EditText(this).apply { contentDescription = label; hint = "1行に1つ入力"; minLines = 2; maxLines = 4; setText(savedInstanceState?.getString(key) ?: preferences.value(key)); root.addView(this) }
         }
         root.addView(TextView(this).apply { text = "通知元アプリの扱い"; textSize = 19f })
         val labels = arrayOf("AI判定", "除外", "最優先登録")

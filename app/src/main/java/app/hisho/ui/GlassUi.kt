@@ -29,7 +29,7 @@ class GlassUi {
                 val isPage = view === content || (view.parent === content && content is ScrollView)
                 view.background = if (isPage) null else surface(context, background.color)
             }
-            if (fresh) {
+            if (fresh && view.tag != HishoDesign.OWNED) {
                 when (view) {
                     is EditText -> {
                         view.background = StateListDrawable().apply {
@@ -61,14 +61,15 @@ class GlassUi {
                         else view.textSize / context.resources.displayMetrics.scaledDensity
                         val title = sp >= 26
                         val section = sp >= 19 && !title
-                        view.textSize = if (title) 32f else if (section) 20f else 15f
+                        view.textSize = if (title) 30f else if (section) 19f else 16f
                         view.typeface = Typeface.create(if (title || section) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
                         view.setLineSpacing(dp(context, if (title) 2 else 4).toFloat(), 1f)
                         if (title || section || view.currentTextColor == Color.BLACK || view.currentTextColor == Color.rgb(92, 101, 97))
                             view.setTextColor(if (title || section) INK else MUTED)
                         if (title) {
+                            androidx.core.view.ViewCompat.setAccessibilityHeading(view, true)
                             view.letterSpacing = -0.025f
-                            view.setPadding(view.paddingLeft, dp(context, 10), view.paddingRight, dp(context, 14))
+                            view.setPadding(view.paddingLeft, dp(context, 4), view.paddingRight, dp(context, 10))
                         }
                         if (view.background != null) view.elevation = dp(context, 1).toFloat()
                         else if (!title) margins(view, 8)
@@ -83,10 +84,15 @@ class GlassUi {
                     view.setPadding(dp(context, 22), dp(context, 8), dp(context, 22), dp(context, 28))
                 }
                 if (view is LinearLayout && view.orientation == LinearLayout.HORIZONTAL) {
+                    if (context.resources.configuration.fontScale >= 1.3f && (0 until view.childCount).all { view.getChildAt(it) is Button }) {
+                        view.orientation = LinearLayout.VERTICAL
+                    }
                     // Existing filter/bulk rows remain rows, but now fit without clipping actions.
                     for (i in 0 until view.childCount) {
                         val child = view.getChildAt(i)
-                        if (child is Button) child.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                        if (child is Button) child.layoutParams = (if (view.orientation == LinearLayout.VERTICAL)
+                            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                        else LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)).apply {
                             marginEnd = dp(context, 4)
                         }
                     }
@@ -100,35 +106,40 @@ class GlassUi {
     private fun styleButton(button: Button) {
         val context = button.context
         val label = button.text.toString()
-        val primary = label in setOf("保存して同期", "設定を保存", "ルールを保存", "タスクをすぐ追加", "タスクを確認する")
+        val primary = button.tag == HishoDesign.PRIMARY || (button.tag == null && label in setOf("保存して同期", "設定を保存", "ルールを保存"))
+        val quiet = button.tag == HishoDesign.QUIET
+        val selected = button.tag == HishoDesign.SELECTED
         val destructive = label.contains("削除")
         val color = if (destructive) Color.rgb(161, 47, 61) else if (primary) Color.WHITE else ACCENT
         button.isAllCaps = false
         button.textSize = 16f
         button.typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        button.minHeight = dp(context, 54)
-        button.minimumHeight = dp(context, 54)
+        button.minHeight = dp(context, 48)
+        button.minimumHeight = dp(context, 48)
         button.minWidth = 0
-        button.setPadding(dp(context, 14), dp(context, 13), dp(context, 14), dp(context, 13))
+        button.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10))
         button.setTextColor(ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()), intArrayOf(Color.rgb(121, 132, 150), color)))
         val shape = if (primary && !destructive) GradientDrawable(GradientDrawable.Orientation.TL_BR,
-            intArrayOf(Color.rgb(61, 123, 226), Color.rgb(39, 88, 184))).apply {
+            intArrayOf(DesignTokens.PRIMARY_START, DesignTokens.PRIMARY_END)).apply {
                 cornerRadius = dp(context, 20).toFloat()
                 setStroke(dp(context, 1), Color.argb(130, 255, 255, 255))
-            } else surface(context, Color.WHITE)
+            } else if (quiet || selected) GradientDrawable().apply {
+                setColor(if (selected) 0xFFE3EDFF.toInt() else Color.TRANSPARENT)
+                cornerRadius = dp(context, 16).toFloat()
+            } else surface(context, 0xFFF0F3F8.toInt())
         button.backgroundTintList = null
         val states = StateListDrawable().apply {
             addState(intArrayOf(-android.R.attr.state_enabled), surface(context, 0xFFD9E0EB.toInt()))
             addState(intArrayOf(), shape)
         }
         button.background = RippleDrawable(ColorStateList.valueOf(if (primary) 0x33FFFFFF else 0x18365EC1), states, null)
-        button.elevation = dp(context, 2).toFloat()
-        button.stateListAnimator = StateListAnimator().apply {
+        button.elevation = if (primary) dp(context, 1).toFloat() else 0f
+        button.stateListAnimator = if (!HishoDesign.motion(context)) null else StateListAnimator().apply {
             fun animation(scale: Float) = AnimatorSet().apply {
                 playTogether(ObjectAnimator.ofFloat(button, View.SCALE_X, scale), ObjectAnimator.ofFloat(button, View.SCALE_Y, scale))
-                duration = 130
+                duration = 100
             }
-            addState(intArrayOf(android.R.attr.state_pressed, android.R.attr.state_enabled), animation(0.975f))
+            addState(intArrayOf(android.R.attr.state_pressed, android.R.attr.state_enabled), animation(0.985f))
             addState(intArrayOf(), animation(1f))
         }
         margins(button, 8)
@@ -142,14 +153,14 @@ class GlassUi {
     }
 
     companion object {
-        val INK = Color.rgb(25, 38, 62)
-        val MUTED = Color.rgb(78, 94, 119)
-        val ACCENT = Color.rgb(35, 83, 169)
+        const val INK = DesignTokens.INK
+        const val MUTED = DesignTokens.MUTED
+        const val ACCENT = DesignTokens.ACCENT
         fun dp(context: Context, value: Int) = (value * context.resources.displayMetrics.density).toInt()
-        fun surface(context: Context, tint: Int): Drawable = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-            intArrayOf(Color.argb(240, 255, 255, 255), Color.argb(205, Color.red(tint), Color.green(tint), Color.blue(tint)))).apply {
+        fun surface(context: Context, tint: Int): Drawable = GradientDrawable().apply {
+                setColor(tint or 0xFF000000.toInt())
                 cornerRadius = dp(context, 22).toFloat()
-                setStroke(dp(context, 1), Color.argb(245, 255, 255, 255))
+                setStroke(dp(context, 1), 0xFFE3E7EE.toInt())
             }
     }
 }
@@ -159,11 +170,7 @@ class GlassBackdrop : Drawable() {
     override fun draw(canvas: Canvas) {
         val w = bounds.width().toFloat()
         val h = bounds.height().toFloat()
-        paint.shader = LinearGradient(0f, 0f, w, h, intArrayOf(0xFFF0F5FF.toInt(), 0xFFEDF4F7.toInt(), 0xFFF2EEFA.toInt()), null, Shader.TileMode.CLAMP)
-        canvas.drawRect(bounds, paint)
-        paint.shader = RadialGradient(w * .9f, h * .12f, maxOf(w, 1f) * .85f, 0x5584B7EE, Color.TRANSPARENT, Shader.TileMode.CLAMP)
-        canvas.drawRect(bounds, paint)
-        paint.shader = RadialGradient(w * .03f, h * .7f, maxOf(w, 1f) * .8f, 0x3391DCCB, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        paint.shader = LinearGradient(0f, 0f, w, h, intArrayOf(0xFFF4F7FC.toInt(), 0xFFF5F6F8.toInt()), null, Shader.TileMode.CLAMP)
         canvas.drawRect(bounds, paint)
     }
     override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }

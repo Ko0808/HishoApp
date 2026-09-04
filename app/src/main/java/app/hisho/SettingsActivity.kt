@@ -53,8 +53,9 @@ class SettingsActivity : app.hisho.ui.GlassActivity() {
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(20.dp, 20.dp, 20.dp, 32.dp) }
         fun note(value: String) { root.addView(TextView(this).apply { text = value; textSize = 17f }) }
         fun button(value: String, action: () -> Unit) { root.addView(Button(this).apply { text = value; setOnClickListener { action() } }, matchWidth()) }
-        root.addView(section("通知 → 必要なタスクだけ登録"))
-        note("1. 登録ルール → 2. AIフィルター → 3. Google接続の順に設定してください。Calendarの予定作成・時間枠通知・自動再配置は停止しました。")
+        root.addView(app.hisho.ui.HishoDesign.text(this, "設定", 30f, true))
+        root.addView(section("通知の整理"))
+        note("除外ルールを優先し、残りをAIが判定します。")
         button("除外・最優先ルールを設定") { startActivity(Intent(this, FilterSettingsActivity::class.java)) }
         button("AIスマートフィルターを設定") { startActivity(Intent(this, AiSettingsActivity::class.java)) }
         root.addView(section("通知の取得"))
@@ -71,6 +72,17 @@ class SettingsActivity : app.hisho.ui.GlassActivity() {
         button("Googleへ接続・再接続") { connectGoogle() }
         note("Google Tasksに登録し、Google側での完了も同期します。APIで送れる期限は日付のみです。時刻付きのCalendar予定は新規作成しません。")
         button("すべてのタスクと除外履歴") { startActivity(Intent(this, MetadataActivity::class.java).putExtra("show_all", true)) }
+        root.addView(section("表示と操作"))
+        val appearance = getSharedPreferences("appearance", MODE_PRIVATE)
+        root.addView(CheckBox(this).apply {
+            text = "動きを減らす"
+            isChecked = appearance.getBoolean("reduce_motion", false)
+            setOnCheckedChangeListener { _, checked ->
+                appearance.edit().putBoolean("reduce_motion", checked).apply()
+                recreate()
+            }
+        })
+        note("押下・表示アニメーションを抑えます。端末のアニメーション無効設定にも従います。")
         root.addView(section("以前作ったCalendar予定の整理"))
         note("タスクは残して、端末がイベントIDを追跡しているHisho予定だけを削除できます。追跡されていない古い予定はCalendarで個別に確認してください。")
         button("整理する予定を選ぶ") { chooseLegacyCleanup() }

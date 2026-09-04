@@ -52,7 +52,9 @@ class ManualTaskActivity : app.hisho.ui.GlassActivity() {
             setBackgroundColor(Color.rgb(246, 247, 242))
         }
         root.addView(TextView(this).apply { text = "タスクを追加"; textSize = 28f })
+        root.addView(TextView(this).apply { text = "タスク名" })
         titleInput = EditText(this).apply {
+            contentDescription = "タスク名"
             hint = "何をする？"; setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_DONE
             filters = arrayOf(android.text.InputFilter.LengthFilter(500))
@@ -65,7 +67,7 @@ class ManualTaskActivity : app.hisho.ui.GlassActivity() {
             }
         }
         root.addView(titleInput, matchWidth())
-        root.addView(TextView(this).apply { text = "タイトルだけで保存できます。初期値は25分・優先度通常・期限なし。共有や音声の内容は確認してから保存してください。" })
+        root.addView(TextView(this).apply { text = "タイトルだけで追加できます。内容を確認して保存してください。" })
         root.addView(Button(this).apply { text = "保存して同期"; setOnClickListener { save() } }, matchWidth())
         root.addView(Button(this).apply { text = "音声で入力"; setOnClickListener { voiceInput() } }, matchWidth())
         val advanced = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = if (advancedOpen) View.VISIBLE else View.GONE }
@@ -78,6 +80,7 @@ class ManualTaskActivity : app.hisho.ui.GlassActivity() {
             }
         }, matchWidth())
         root.addView(advanced, matchWidth())
+        advanced.addView(TextView(this).apply { text = "初期値: 工数25分・優先度通常・期限なし。Googleへ同期する期限は日付のみです。" })
         deadlineButton = Button(this).apply {
             text = deadlineEpochMillis?.let { "期限 ${FORMAT.format(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))}" } ?: "期限なし"
             setOnClickListener { selectDeadline() }
@@ -155,7 +158,8 @@ class ManualTaskActivity : app.hisho.ui.GlassActivity() {
         if (saving) return
         val title = titleInput.text.toString().trim()
         if (title.isBlank()) {
-            Toast.makeText(this, "タスク名を入力してください", Toast.LENGTH_SHORT).show()
+            titleInput.error = "タスク名を入力してください"
+            titleInput.requestFocus()
             return
         }
         saving = true

@@ -52,7 +52,9 @@ class AiSettingsActivity : app.hisho.ui.GlassActivity() {
             isChecked = preferences.contentConsent
         }
         root.addView(consent)
+        root.addView(TextView(this).apply { text = "APIキー" })
         val keyInput = EditText(this).apply {
+            contentDescription = "OpenAI APIキー"
             hint = if (preferences.apiKey() == null) "OpenAI APIキー" else "保存済み（変更する場合のみ入力）"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             maxLines = 1

@@ -23,6 +23,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.sync.CaptureSyncWorker
+import app.hisho.ui.HishoDesign as D
 
 class MetadataActivity : app.hisho.ui.GlassActivity() {
     private lateinit var root: LinearLayout
@@ -33,44 +34,69 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
     private lateinit var bulkCompleteButton: Button
     private lateinit var bulkDeleteButton: Button
     private lateinit var clearSelectionButton: Button
+    private var selectionMode = false
+    private lateinit var scroll: ScrollView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.getBooleanExtra("show_all", false)) selectedFilter = TaskFilter.ALL
+        val filterName = savedInstanceState?.getString("filter") ?: intent.getStringExtra("filter")
+        TaskFilter.entries.firstOrNull { it.name == filterName }?.let { selectedFilter = it }
+        searchQuery = savedInstanceState?.getString("query").orEmpty()
+        selectionMode = savedInstanceState?.getBoolean("selection", false) ?: false
+        savedInstanceState?.getLongArray("selected")?.forEach { selectedTaskIds += it }
         val padding = (20 * resources.displayMetrics.density).toInt()
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(padding, padding, padding, padding)
             setBackgroundColor(Color.rgb(246, 247, 242))
         }
-        setContentView(ScrollView(this).apply { addView(root) })
+        scroll = ScrollView(this).apply { addView(root) }
+        setContentView(scroll)
         render()
+        if (savedInstanceState == null && intent.hasExtra("open_task_id")) {
+            val id = intent.getLongExtra("open_task_id", -1)
+            database.recentMetadata(10000).firstOrNull { it.id == id }?.let { root.post { showTaskOverview(it) } }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("filter", selectedFilter.name)
+        outState.putString("query", searchQuery)
+        outState.putBoolean("selection", selectionMode)
+        outState.putLongArray("selected", selectedTaskIds.toLongArray())
+        super.onSaveInstanceState(outState)
     }
 
     private fun render() {
+        val previousScroll = scroll.scrollY
         root.removeAllViews()
         root.addView(TextView(this).apply {
-            text = "タスクの確認"
+            text = "タスク"
             textSize = 28f
             setTextColor(Color.rgb(24, 39, 34))
         })
         root.addView(TextView(this).apply {
-            text = "AIの確認待ちは「詳細・操作」から承認・除外・再判定できます。登録済みはGoogle Tasksで完了できます。"
-            setPadding(0, 8.dp, 0, 16.dp)
+            text = "必要な用事だけ、ひとつずつ。"
+            setPadding(0, 0, 0, 4.dp)
         })
 
-        root.addView(app.hisho.ui.SyncStatusView(this) { root.post { render() } })
-        root.addView(Button(this).apply {
-            text = "今すぐ同期"
-            setOnClickListener { enqueueSync() }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { bottomMargin = 16.dp })
+        val syncCard = D.card(this)
+        syncCard.addView(app.hisho.ui.SyncStatusView(this, onSync = { enqueueSync() }) { root.post { render() } })
+        root.addView(syncCard, D.spacing(this))
+
+        val quickFilters = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; tag = D.OWNED }
+        listOf(TaskFilter.ATTENTION, TaskFilter.PENDING, TaskFilter.SYNCED).forEach { filter ->
+            quickFilters.addView(D.button(this, filter.label, if (selectedFilter == filter) D.SELECTED else D.QUIET) {
+                selectedFilter = filter; selectedTaskIds.clear(); render()
+            }.apply { isSelected = selectedFilter == filter }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 4.dp })
+        }
+        root.addView(android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(quickFilters) })
 
         val filterRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         filterRow.addView(Button(this).apply {
-            text = "絞り込み: ${selectedFilter.label}"
+            text = if (selectedFilter in listOf(TaskFilter.ATTENTION, TaskFilter.PENDING, TaskFilter.SYNCED)) "その他 ▾" else "${selectedFilter.label} ▾"
+            tag = D.QUIET
             setOnClickListener {
                 AlertDialog.Builder(this@MetadataActivity)
                     .setTitle("表示するタスク")
@@ -84,6 +110,7 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
         })
         filterRow.addView(Button(this).apply {
             text = if (searchQuery.isBlank()) "検索" else "検索: $searchQuery"
+            tag = D.QUIET
             setOnClickListener { showSearchDialog() }
         })
         if (searchQuery.isNotBlank()) {
@@ -96,6 +123,10 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
                 }
             })
         }
+        filterRow.addView(D.button(this, if (selectionMode) "選択終了" else "選択") {
+            selectionMode = !selectionMode
+            selectedTaskIds.clear(); render()
+        })
         root.addView(filterRow)
 
         val bulkRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -117,6 +148,7 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
         bulkRow.addView(bulkDeleteButton)
         bulkRow.addView(clearSelectionButton)
         root.addView(bulkRow)
+        bulkRow.visibility = if (selectionMode) android.view.View.VISIBLE else android.view.View.GONE
         updateBulkButtons()
 
         val items = database.recentMetadata(
@@ -136,13 +168,10 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
             return
         }
         items.forEach { item ->
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(12.dp, 12.dp, 12.dp, 12.dp)
-                setBackgroundColor(Color.WHITE)
-            }
-            card.addView(CheckBox(this).apply {
+            val card = D.card(this)
+            if (selectionMode) card.addView(CheckBox(this).apply {
                 text = "選択"
+                contentDescription = "${item.actionTitle}を選択"
                 isChecked = item.id in selectedTaskIds
                 setOnCheckedChangeListener { _, checked ->
                     if (checked) selectedTaskIds += item.id else selectedTaskIds -= item.id
@@ -152,28 +181,72 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
             card.addView(TextView(this).apply {
                 val risk = item.state == "SYNCED" && selectedFilter in setOf(TaskFilter.INBOX, TaskFilter.RISK)
                 text = "${sourceLabel(item.sourcePackage)}  •  ${if (risk) "期限注意" else stateLabel(item.state)}"
-                textSize = 17f
+                textSize = 15f
                 setTextColor(if (risk) Color.rgb(168, 62, 48) else stateColor(item.state))
             })
             card.addView(TextView(this).apply {
                 text = item.actionTitle.ifBlank { "タイトル未保存" }
                 textSize = 20f
-                maxLines = 3
-                ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(0, 8.dp, 0, 4.dp)
             })
             card.addView(TextView(this).apply {
                 text = "期限: ${formatDeadline(item.deadlineEpochMillis)}" + errorDescription(item.lastErrorCode)
             })
             card.addView(Button(this).apply {
-                text = "詳細・操作"
-                setOnClickListener { showTaskActions(item) }
+                text = if (item.state == "REVIEW") "内容を確認する  ›" else "タスクを開く  ›"
+                tag = D.QUIET
+                contentDescription = "${item.actionTitle}を開く"
+                setOnClickListener { showTaskOverview(item) }
             })
             root.addView(card, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = 12.dp })
         }
+        root.post { scroll.scrollTo(0, previousScroll) }
+    }
+
+    private fun showTaskOverview(item: CaptureQueueDatabase.MetadataItem) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20.dp, 8.dp, 20.dp, 12.dp)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(if (item.state == "REVIEW") "通知を確認" else "タスク")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton("閉じる", null).create()
+        content.addView(D.text(this, item.actionTitle, 20f, true))
+        content.addView(D.text(this, "${sourceLabel(item.sourcePackage)} · ${stateLabel(item.state)}", 15f))
+        content.addView(D.text(this, "判定理由", 17f, true))
+        content.addView(D.text(this, item.reason.ifBlank { "判定理由は記録されていません" }))
+        if (item.state == "REVIEW") {
+            content.addView(D.text(this, "元の通知", 17f, true))
+            val original = D.text(this, database.notificationPreview(item.id)).apply {
+                setTextIsSelectable(true); maxLines = 6; ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            content.addView(original)
+            content.addView(D.button(this, "通知の全文を表示") {
+                original.maxLines = Int.MAX_VALUE; original.ellipsize = null
+            })
+            content.addView(D.text(this, "登録前に名前を直す場合は「名前・期限などを編集」へ。", 14f))
+            content.addView(D.button(this, "確認してタスクに登録", D.PRIMARY) {
+                database.approveReview(item.id); dialog.dismiss(); enqueueSync(); render()
+            })
+            content.addView(D.button(this, "AIで再判定する") {
+                database.retryReview(item.id); dialog.dismiss(); enqueueSync(); render()
+            })
+            content.addView(D.button(this, "不要として除外") {
+                database.filterResult(item.id, "IGNORED", "ユーザーが除外"); dialog.dismiss(); render()
+            })
+        } else if (item.state in setOf("SYNCED", "NEEDS_ATTENTION")) {
+            content.addView(D.text(this, "期限: ${formatDeadline(item.deadlineEpochMillis)}"))
+            content.addView(D.button(this, "完了にする", D.PRIMARY) {
+                database.requestCompletion(item.id); dialog.dismiss(); enqueueSync(); render()
+            })
+        }
+        content.addView(D.button(this, "名前・期限などを編集 / 詳細・操作") { dialog.dismiss(); showTaskActions(item) })
+        dialog.show()
+        app.hisho.ui.GlassUi().apply(content, content)
+        D.reveal(content)
     }
 
     private fun showTaskActions(item: CaptureQueueDatabase.MetadataItem) {

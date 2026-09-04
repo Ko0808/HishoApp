@@ -1,6 +1,10 @@
 # Hisho / 秘書
 
-**Version: 0.32.2 (36)** — Personal use only / 個人利用専用
+**Version: 0.33.0 (37)** — Personal use only / 個人利用専用
+
+0.33.0: Apple HIGの操作階層・素材・動き・可読性を参考にUI/UXを再設計しました。ホームは次の行動を一つ強調し、タスクは要確認／未同期／同期済みを直接切り替えられます。タスクを開くと判定理由と操作を確認でき、「詳細・操作」も残しています。同期欄の「同期」が従来の「今すぐ同期」です。「設定 → 表示と操作」で動きを減らせます。[レビューと再設計](docs/hig-ui-review.md)
+
+0.33.0: HIG-informed native Android redesign with one contextual primary action, direct task-state filters, evidence and actions together, and compact live sync status. The Sync button replaces the former Sync now label. Reduced motion is available in Settings. Existing app functionality and AI/data policies are unchanged. [Review and design](docs/hig-ui-review.md)
 
 0.32.2: ホーム・タスク確認画面に自動更新する同期状況を追加。開始待ち、Google接続、AI判定、Google登録、完了、要確認、エラーと最終更新時刻を表示します。通知の件数は今回の処理分（最大20件）の現在位置です。連打で実行中の同期を中断しないようにし、通信待ちも表示します。確認待ちは引き続き明示的な再判定が必要です。
 
