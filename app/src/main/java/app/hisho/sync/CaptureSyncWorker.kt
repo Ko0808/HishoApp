@@ -9,6 +9,7 @@ import app.hisho.ai.OpenAiSchedulingAdvisor
 import app.hisho.ai.AnonymousAvailabilityCalculator
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.intelligence.ActionTitleGenerator
+import app.hisho.notification.ExecutionReminderScheduler
 import app.hisho.scheduling.DeterministicScheduler
 import app.hisho.scheduling.SchedulingPreferences
 import app.hisho.scheduling.TaskBlockPlanner
@@ -47,6 +48,7 @@ class CaptureSyncWorker(
         return try {
             val taskListId = tasksApi.findOrCreateTaskList(TASK_LIST_TITLE)
             database.deletionRequests().forEach { request ->
+                ExecutionReminderScheduler.cancel(applicationContext, request.id)
                 database.calendarBlocks(request.id).forEach { block ->
                     calendarApi.deleteEvent(block.calendarEventId)
                 }
@@ -54,10 +56,12 @@ class CaptureSyncWorker(
                 database.markDeleted(request.id)
             }
             database.completionRequests().forEach { request ->
+                ExecutionReminderScheduler.cancel(applicationContext, request.id)
                 tasksApi.completeTask(taskListId, request.googleTaskId)
                 database.markCompleted(request.id)
             }
             reconcileCalendarBlocks(calendarApi, database)
+            ExecutionReminderScheduler.restoreUpcoming(applicationContext)
             val pending = database.pending()
             val advisor = OpenAiSchedulingAdvisor(applicationContext)
             val availability = if (advisor.isEnabled() && pending.isNotEmpty()) {
@@ -170,6 +174,7 @@ class CaptureSyncWorker(
                 scheduledBlockCount = events.size,
             )
             database.replaceCalendarBlocks(capture.id, events.toBlockRecords(capture.recoveryCount))
+            scheduleExecutionReminders(capture.id, events)
         } catch (error: Exception) {
             database.markRetry(capture.id, error.javaClass.simpleName)
             throw error
@@ -220,6 +225,7 @@ class CaptureSyncWorker(
             scheduledBlockCount = events.size,
         )
         database.replaceCalendarBlocks(capture.id, events.toBlockRecords(recoveryCount))
+        scheduleExecutionReminders(capture.id, events)
     }
 
     private fun deleteScheduledBlocks(
@@ -255,6 +261,21 @@ class CaptureSyncWorker(
             startEpochMillis = event.start.toEpochMilli(),
             endEpochMillis = event.end.toEpochMilli(),
         )
+    }
+
+    private fun scheduleExecutionReminders(
+        captureId: Long,
+        events: List<GoogleCalendarApi.CalendarEvent>,
+    ) {
+        ExecutionReminderScheduler.cancel(applicationContext, captureId)
+        events.sortedBy { it.start }.forEachIndexed { index, event ->
+            ExecutionReminderScheduler.schedule(
+                applicationContext,
+                captureId,
+                index + 1,
+                event.start.toEpochMilli(),
+            )
+        }
     }
 
     private fun scheduleBlocks(

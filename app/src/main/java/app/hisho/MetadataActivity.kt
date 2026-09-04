@@ -27,7 +27,7 @@ import app.hisho.sync.CaptureSyncWorker
 class MetadataActivity : Activity() {
     private lateinit var root: LinearLayout
     private val database by lazy { CaptureQueueDatabase(this) }
-    private var selectedFilter = TaskFilter.ALL
+    private var selectedFilter = TaskFilter.INBOX
     private var searchQuery = ""
     private val selectedTaskIds = mutableSetOf<Long>()
     private lateinit var bulkCompleteButton: Button
@@ -36,6 +36,7 @@ class MetadataActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra("show_all", false)) selectedFilter = TaskFilter.ALL
         val padding = (20 * resources.displayMetrics.density).toInt()
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -49,12 +50,12 @@ class MetadataActivity : Activity() {
     private fun render() {
         root.removeAllViews()
         root.addView(TextView(this).apply {
-            text = "タスク推定の修正"
+            text = "タスクの確認"
             textSize = 28f
             setTextColor(Color.rgb(24, 39, 34))
         })
         root.addView(TextView(this).apply {
-            text = "未同期・同期済みタスクの名前、工数、優先度、期限を変更できます。同期済みの変更は「今すぐ同期」でCalendarへ再配置されます。"
+            text = "対応が必要なタスクをまとめました。通常の予定はCalendarで確認できます。編集は「詳細・操作」から行えます。"
             setPadding(0, 8.dp, 0, 16.dp)
         })
 
@@ -70,9 +71,14 @@ class MetadataActivity : Activity() {
         filterRow.addView(Button(this).apply {
             text = "絞り込み: ${selectedFilter.label}"
             setOnClickListener {
-                selectedFilter = selectedFilter.next()
-                selectedTaskIds.clear()
-                render()
+                AlertDialog.Builder(this@MetadataActivity)
+                    .setTitle("表示するタスク")
+                    .setSingleChoiceItems(TaskFilter.entries.map { it.label }.toTypedArray(), selectedFilter.ordinal) { dialog, index ->
+                        selectedFilter = TaskFilter.entries[index]
+                        selectedTaskIds.clear()
+                        dialog.dismiss()
+                        render()
+                    }.show()
             }
         })
         filterRow.addView(Button(this).apply {
@@ -115,12 +121,15 @@ class MetadataActivity : Activity() {
         val items = database.recentMetadata(
             states = selectedFilter.states,
             searchQuery = searchQuery,
+            attentionOnly = selectedFilter == TaskFilter.INBOX,
+            riskOnly = selectedFilter == TaskFilter.RISK,
         )
         if (items.isEmpty()) {
             root.addView(TextView(this).apply {
                 text = if (selectedFilter == TaskFilter.ALL && searchQuery.isBlank()) {
                     "解析済み通知はありません"
-                } else "条件に一致するタスクはありません"
+                } else if (selectedFilter == TaskFilter.INBOX && searchQuery.isBlank()) "対応が必要なタスクはありません。Hishoに任せて大丈夫です。"
+                else "条件に一致するタスクはありません"
                 setPadding(0, 16.dp, 0, 0)
             })
             return
@@ -140,115 +149,63 @@ class MetadataActivity : Activity() {
                 }
             })
             card.addView(TextView(this).apply {
-                text = "${sourceLabel(item.sourcePackage)}  •  ${stateLabel(item.state)}"
+                val risk = item.state == "SYNCED" && selectedFilter in setOf(TaskFilter.INBOX, TaskFilter.RISK)
+                text = "${sourceLabel(item.sourcePackage)}  •  ${if (risk) "期限注意" else stateLabel(item.state)}"
                 textSize = 17f
-                setTextColor(stateColor(item.state))
+                setTextColor(if (risk) Color.rgb(168, 62, 48) else stateColor(item.state))
             })
             card.addView(TextView(this).apply {
-                text = "${item.category} / 優先度 ${priorityLabel(item.priority)}" +
-                    "\n期限: ${formatDeadline(item.deadlineEpochMillis)}\n判定: ${item.reason}" +
-                    errorDescription(item.lastErrorCode)
-            })
-            card.addView(TextView(this).apply {
-                text = item.actionTitle.ifBlank { "（旧データ：タイトル未保存）" }
-                textSize = 18f
+                text = item.actionTitle.ifBlank { "タイトル未保存" }
+                textSize = 20f
                 setPadding(0, 8.dp, 0, 4.dp)
             })
-            val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            val editable = item.state !in setOf(
-                "FAILED", "COMPLETED", "NEEDS_ATTENTION", "COMPLETE_REQUESTED",
-            )
-            actions.addView(Button(this).apply {
-                text = "名前を編集"
-                isEnabled = editable
-                setOnClickListener { showTitleEditor(item.id, item.actionTitle) }
+            card.addView(TextView(this).apply {
+                text = "期限: ${formatDeadline(item.deadlineEpochMillis)}" + errorDescription(item.lastErrorCode)
             })
-            actions.addView(Button(this).apply {
-                text = "工数 ${item.effort}"
-                isEnabled = editable
-                setOnClickListener {
-                    database.cycleEffort(item.id)
-                    render()
-                }
-            })
-            actions.addView(Button(this).apply {
-                text = if (item.state == "IGNORED") "タスク化" else "除外"
-                isEnabled = item.state in setOf("PENDING", "RETRY", "IGNORED")
-                setOnClickListener {
-                    database.toggleCandidate(item.id)
-                    enqueueSync()
-                    render()
-                }
-            })
-            card.addView(actions)
-            val metadataActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            metadataActions.addView(Button(this).apply {
-                text = "優先度 ${priorityLabel(item.priority)}"
-                isEnabled = editable
-                setOnClickListener {
-                    database.cyclePriority(item.id)
-                    render()
-                }
-            })
-            metadataActions.addView(Button(this).apply {
-                text = "期限を設定"
-                isEnabled = editable
-                setOnClickListener { showDeadlineEditor(item.id, item.deadlineEpochMillis) }
-            })
-            metadataActions.addView(Button(this).apply {
-                text = "期限なし"
-                isEnabled = editable && item.deadlineEpochMillis != null
-                setOnClickListener {
-                    database.updateDeadline(item.id, null)
-                    render()
-                }
-            })
-            card.addView(metadataActions)
             card.addView(Button(this).apply {
-                text = "詳細"
-                setOnClickListener { showTaskDetail(item.id) }
+                text = "詳細・操作"
+                setOnClickListener { showTaskActions(item) }
             })
-            if (item.state == "NEEDS_ATTENTION") {
-                val recoveryActions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                recoveryActions.addView(Button(this).apply {
-                    text = "再計画を再開"
-                    setOnClickListener {
-                        database.restartRecovery(item.id)
-                        enqueueSync()
-                        render()
-                    }
-                })
-                recoveryActions.addView(Button(this).apply {
-                    text = "完了にする"
-                    setOnClickListener {
-                        database.requestCompletion(item.id)
-                        enqueueSync()
-                        render()
-                    }
-                })
-                card.addView(recoveryActions)
-            } else if (item.state == "SYNCED") {
-                card.addView(Button(this).apply {
-                    text = "完了にする"
-                    setOnClickListener {
-                        database.requestCompletion(item.id)
-                        enqueueSync()
-                        render()
-                    }
-                })
-            }
-            if (item.state !in setOf("DELETE_REQUESTED", "DELETED")) {
-                card.addView(Button(this).apply {
-                    text = "削除"
-                    setTextColor(Color.rgb(168, 62, 48))
-                    setOnClickListener { confirmDeletion(item.id, item.actionTitle) }
-                })
-            }
             root.addView(card, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { bottomMargin = 12.dp })
         }
+    }
+
+    private fun showTaskActions(item: CaptureQueueDatabase.MetadataItem) {
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        fun option(label: String, action: () -> Unit) { labels += label; actions += action }
+        option("配置時刻と詳細を見る") { showTaskDetail(item.id) }
+        if (item.state == "NEEDS_ATTENTION") {
+            option("自動再配置を再開") { database.restartRecovery(item.id); enqueueSync(); render() }
+        }
+        if (item.state in setOf("SYNCED", "NEEDS_ATTENTION")) {
+            option("完了にする") { database.requestCompletion(item.id); enqueueSync(); render() }
+        }
+        if (item.state == "SYNCED") {
+            option("空き時間へ再配置") { database.requestReschedule(item.id); enqueueSync(); render() }
+        }
+        if (item.state in setOf("PENDING", "RETRY")) option("同期を再実行") { enqueueSync() }
+        if (item.state in setOf("PENDING", "RETRY", "SYNCED", "IGNORED")) {
+            option("名前を編集") { showTitleEditor(item.id, item.actionTitle) }
+            option("工数を変更（現在 ${item.effort}）") { database.cycleEffort(item.id); enqueueSync(); render() }
+            option("優先度を変更（現在 ${priorityLabel(item.priority)}）") { database.cyclePriority(item.id); enqueueSync(); render() }
+            option("期限を変更") { showDeadlineEditor(item.id, item.deadlineEpochMillis) }
+            option("期限を解除") { database.updateDeadline(item.id, null); enqueueSync(); render() }
+        }
+        if (item.state in setOf("PENDING", "RETRY", "IGNORED")) {
+            option(if (item.state == "IGNORED") "タスクとして復帰" else "不要なタスクとして除外") {
+                database.toggleCandidate(item.id); enqueueSync(); render()
+            }
+        }
+        if (item.state !in setOf("DELETE_REQUESTED", "DELETED")) {
+            option("削除…") { confirmDeletion(item.id, item.actionTitle) }
+        }
+        AlertDialog.Builder(this).setTitle(item.actionTitle)
+            .setItems(labels.toTypedArray()) { _, index -> actions[index]() }
+            .setNegativeButton("閉じる", null).show()
     }
 
     private fun showTitleEditor(id: Long, currentTitle: String) {
@@ -394,6 +351,7 @@ class MetadataActivity : Activity() {
                             year, month + 1, day, hour, minute, 0, 0, ZoneId.systemDefault(),
                         ).toInstant().toEpochMilli()
                         database.updateDeadline(id, deadline)
+                        enqueueSync()
                         render()
                     },
                     initial.hour,
@@ -449,7 +407,7 @@ class MetadataActivity : Activity() {
         "COMPLETED" -> "完了"
         "IGNORED" -> "除外"
         "FAILED" -> "同期失敗"
-        "NEEDS_ATTENTION" -> "要確認（再計画上限）"
+        "NEEDS_ATTENTION" -> "再配置の確認が必要"
         "COMPLETE_REQUESTED" -> "完了を同期中"
         "DELETE_REQUESTED" -> "削除を同期中"
         else -> state
@@ -474,6 +432,8 @@ class MetadataActivity : Activity() {
     }
 
     private enum class TaskFilter(val label: String, val states: Set<String>) {
+        INBOX("対応が必要", emptySet()),
+        RISK("期限注意", emptySet()),
         ALL("すべて", emptySet()),
         PENDING("未同期", setOf("PENDING", "RETRY")),
         SYNCED("同期済み", setOf("SYNCED", "COMPLETE_REQUESTED")),

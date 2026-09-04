@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.27.0` (`versionCode 29`)
+**Current version / 現在のバージョン:** `0.29.0` (`versionCode 31`)
 
 ---
 
@@ -26,6 +26,9 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 
 ### 実装済みの機能
 
+- 対応が必要なタスクを初期表示する確認Inbox（期限注意・未同期・再配置の確認）
+- 表示対象を直接選ぶフィルターと、編集をまとめた「詳細・操作」メニュー
+
 - `NotificationListenerService`による通知取得とアプリ別ON／OFF
 - SHA-256と時間窓による重複排除
 - 通知本文とGoogleアクセストークンの暗号化
@@ -44,6 +47,9 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 - 次のタスク、自動運転状態、対応が必要な問題だけに絞ったホーム画面
 - 締切危険・同期失敗・要確認・同期待ちからタスク確認へ進む導線
 - Google Calendarを直接開く操作と、運用項目を集約した設定画面
+- Calendar枠の開始5分前と開始時に届く実行タイミング通知
+- 実行通知からの完了、15分後への延期、空き時間への再配置
+- アプリ更新・再起動後の既存Calendar枠に対する通知予約の復元
 - タスク状態の絞り込みとタスク名・通知元の検索
 - 確認付きのタスク削除とGoogle Tasks・追跡Calendar枠の連動削除
 - 通知元、状態、期限、配置、再計画回数、全Calendar枠を確認できるタスク詳細
@@ -104,9 +110,10 @@ APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
 1. Hishoを起動し、「設定」から通知へのアクセスを許可します。
 2. 設定画面で取得対象のアプリを選択します。
 3. 設定画面からGoogleアカウントを接続し、TasksとCalendarへのアクセスを許可します。
-4. 通知受信後、「端末内キュー」で同期待ち件数を確認します。
-5. 必要なら「タスク推定を確認・修正」で編集します。
-6. 「今すぐ同期」を押すか、バックグラウンド同期を待ちます。
+4. Android 13以降では、設定画面から実行タイミング通知を許可します。
+5. 通知受信後、ホームの「対応が必要」で同期待ち件数を確認します。
+6. 必要なら「タスクを確認する」から編集します。
+7. 「今すぐ同期」を押すか、バックグラウンド同期を待ちます。
 
 AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を確認し、OpenAI APIキーを保存して明示的に同意した場合のみ有効になります。APIキーはAndroid Keystoreの鍵で暗号化されます。
 
@@ -122,6 +129,7 @@ AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を�
 8. 再計画上限で「要確認」になり、再開または完了にできることを確認します。
 9. AI支援を有効にし、複数の同期待ちタスクでAI適用・過密状態が表示されること、長時間タスクが提案された長さに分割されることを確認します。
 10. AI通信を失敗させても、通常の優先順と最大60分の分割で同期が継続することを確認します。
+11. Calendar枠の5分前と開始時に通知され、通知から完了・15分後・再配置を操作できることを確認します。
 
 ### プライバシーと安全性
 
@@ -172,6 +180,9 @@ Notification content is not currently sent to an external AI service.
 
 ### Implemented features
 
+- An attention-first review inbox for deadline risk, pending sync, and recovery issues
+- Direct filter selection and a compact details/actions menu instead of per-card editing controls
+
 - Notification capture with `NotificationListenerService` and per-app toggles
 - SHA-256 and time-window deduplication
 - Encrypted notification payloads and Google access tokens
@@ -190,6 +201,9 @@ Notification content is not currently sent to an external AI service.
 - A calm home screen focused on the next task, automation health, and actionable problems
 - Direct task-review paths for deadline risk, sync failures, attention items, and pending work
 - Direct Google Calendar access with operational controls consolidated in Settings
+- Execution reminders five minutes before and at the start of each Calendar block
+- Complete, snooze for 15 minutes, and reschedule actions directly from reminders
+- Reminder restoration for existing future Calendar blocks after an update or restart
 - Task-state filters and title/source search
 - Confirmed task deletion synchronized with Google Tasks and all tracked Calendar blocks
 - Task details covering source, state, deadline, schedule, recovery count, and every Calendar block
@@ -249,9 +263,10 @@ APK output: `app/build/outputs/apk/debug/app-debug.apk`
 1. Open Hisho and grant notification access.
 2. Select the apps to capture.
 3. Connect a Google account and grant Tasks and Calendar access.
-4. Generate a notification and check the pending queue count.
-5. Optionally review and edit the inferred task.
-6. Select **Sync now** or wait for background synchronization.
+4. On Android 13 or later, allow execution reminders from Settings.
+5. Generate a notification and check pending work under **Needs attention**.
+6. Optionally review and edit the inferred task.
+7. Select **Sync now** or wait for background synchronization.
 
 AI assistance is off by default. It is enabled only after reviewing the transmitted fields, saving an OpenAI API key, and explicitly consenting in **AI assistance settings**. The API key is encrypted with an Android Keystore-backed key.
 
@@ -267,6 +282,7 @@ AI assistance is off by default. It is enabled only after reviewing the transmit
 8. Verify a task exceeding its limit becomes **Needs attention** and can be restarted or completed.
 9. Enable AI assistance and verify its applied/overloaded status and suggested block lengths with multiple pending tasks.
 10. Force an AI request failure and confirm synchronization continues with deterministic ordering and 60-minute blocks.
+11. Verify reminders arrive five minutes before and at block start, then test Complete, 15 minutes later, and Reschedule.
 
 ### Privacy and safety
 

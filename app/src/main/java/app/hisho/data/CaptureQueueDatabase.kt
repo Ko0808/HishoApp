@@ -64,6 +64,7 @@ class CaptureQueueDatabase(context: Context) :
         val endEpochMillis: Long,
     )
     data class TrackedCalendarBlock(val captureId: Long, val calendarEventId: String)
+    data class UpcomingCalendarBlock(val captureId: Long, val blockIndex: Int, val startEpochMillis: Long)
     data class TaskDetail(
         val id: Long,
         val actionTitle: String,
@@ -278,10 +279,19 @@ class CaptureQueueDatabase(context: Context) :
         limit: Int = 100,
         states: Set<String> = emptySet(),
         searchQuery: String = "",
+        attentionOnly: Boolean = false,
+        riskOnly: Boolean = false,
     ): List<MetadataItem> {
         val clauses = mutableListOf<String>()
         val arguments = mutableListOf<String>()
         clauses += "state != 'DELETED'"
+        val riskClause = "(state = 'SYNCED' AND deadline IS NOT NULL AND " +
+            "(deadline < ? OR scheduled_end IS NULL OR scheduled_end > deadline))"
+        if (attentionOnly || riskOnly) {
+            clauses += if (riskOnly) riskClause else
+                "(state IN ('NEEDS_ATTENTION','FAILED','RETRY','PENDING') OR $riskClause)"
+            arguments += System.currentTimeMillis().toString()
+        }
         if (states.isNotEmpty()) {
             clauses += "state IN (${states.joinToString(",") { "?" }})"
             arguments += states
@@ -601,6 +611,25 @@ class CaptureQueueDatabase(context: Context) :
         }
     }
 
+    fun upcomingCalendarBlocks(afterEpochMillis: Long, limit: Int = 100): List<UpcomingCalendarBlock> =
+        readableDatabase.rawQuery(
+            """
+            SELECT b.capture_queue_id, b.block_index, b.start_at
+            FROM calendar_blocks b
+            JOIN capture_queue q ON q.id = b.capture_queue_id
+            WHERE q.state = 'SYNCED' AND b.start_at >= ?
+            ORDER BY b.start_at ASC
+            LIMIT ?
+            """.trimIndent(),
+            arrayOf(afterEpochMillis.toString(), limit.toString()),
+        ).use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    add(UpcomingCalendarBlock(cursor.getLong(0), cursor.getInt(1), cursor.getLong(2)))
+                }
+            }
+        }
+
     fun taskDetail(id: Long): TaskDetail? = readableDatabase.query(
         "capture_queue",
         arrayOf(
@@ -703,6 +732,16 @@ class CaptureQueueDatabase(context: Context) :
             UPDATE capture_queue SET state = 'COMPLETE_REQUESTED', last_error_code = NULL
             WHERE id = ? AND google_task_id IS NOT NULL
                 AND state IN ('SYNCED','NEEDS_ATTENTION')
+            """.trimIndent(),
+            arrayOf(id),
+        )
+    }
+
+    fun requestReschedule(id: Long) {
+        writableDatabase.execSQL(
+            """
+            UPDATE capture_queue SET reschedule_requested = 1, last_error_code = NULL
+            WHERE id = ? AND state = 'SYNCED' AND google_task_id IS NOT NULL
             """.trimIndent(),
             arrayOf(id),
         )

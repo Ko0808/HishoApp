@@ -1,11 +1,14 @@
 package app.hisho
 
 import android.app.Activity
+import android.Manifest
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.IntentSender
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Build
+import android.content.pm.PackageManager
 import android.provider.Settings
 import android.view.ViewGroup
 import android.widget.Button
@@ -15,6 +18,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
@@ -23,6 +27,7 @@ import app.hisho.ai.AiPreferences
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.auth.GoogleTasksAuthorization
 import app.hisho.capture.CapturePreferences
+import app.hisho.notification.ExecutionReminderScheduler
 import app.hisho.scheduling.RecoveryPreferences
 import app.hisho.scheduling.SchedulingPreferences
 import app.hisho.sync.CaptureSyncWorker
@@ -68,6 +73,16 @@ class SettingsActivity : Activity() {
                 setOnCheckedChangeListener { _, checked -> capture.setEnabled(packageName, checked) }
             })
         }
+
+        root.addView(section("実行タイミング通知"))
+        val reminderReady = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        root.addView(status(if (reminderReady) "有効 — 開始5分前と開始時に通知" else "通知の許可が必要です", reminderReady))
+        if (!reminderReady && Build.VERSION.SDK_INT >= 33) root.addView(Button(this).apply {
+            text = "実行通知を許可"
+            setOnClickListener { requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS) }
+        }, matchWidth())
 
         root.addView(section("Google Tasks / Calendar"))
         val googleReady = EncryptedAuthStore(this).isConnected()
@@ -146,7 +161,7 @@ class SettingsActivity : Activity() {
         root.addView(section("詳細"))
         root.addView(Button(this).apply {
             text = "すべてのタスクを確認・修正"
-            setOnClickListener { startActivity(Intent(this@SettingsActivity, MetadataActivity::class.java)) }
+            setOnClickListener { startActivity(Intent(this@SettingsActivity, MetadataActivity::class.java).putExtra("show_all", true)) }
         }, matchWidth())
         return ScrollView(this).apply { addView(root) }
     }
@@ -160,6 +175,16 @@ class SettingsActivity : Activity() {
             }
             override fun onError(message: String) = showAuthError(message)
         })
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_NOTIFICATIONS) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                ExecutionReminderScheduler.restoreUpcoming(this)
+            }
+            setContentView(content())
+        }
     }
 
     @Deprecated("Legacy callback is required for the Google Authorization PendingIntent")
@@ -208,6 +233,7 @@ class SettingsActivity : Activity() {
     private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
 
     private companion object {
+        const val REQUEST_NOTIFICATIONS = 2001
         val INK = Color.rgb(24, 39, 34)
         val MUTED = Color.rgb(92, 101, 97)
         val SUCCESS = Color.rgb(28, 112, 76)

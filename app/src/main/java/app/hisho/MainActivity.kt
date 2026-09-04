@@ -1,11 +1,14 @@
 package app.hisho
 
 import android.app.Activity
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
+import android.content.pm.PackageManager
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
@@ -13,6 +16,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -23,6 +27,7 @@ import androidx.work.WorkManager
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.scheduling.RecoveryPreferences
+import app.hisho.notification.ExecutionReminderScheduler
 import app.hisho.scheduling.ScheduleHealth
 import app.hisho.sync.CaptureSyncWorker
 import app.hisho.sync.SyncStatusStore
@@ -44,6 +49,7 @@ class MainActivity : Activity() {
         title = getString(R.string.app_name)
         setContentView(content())
         schedulePeriodicSync()
+        ExecutionReminderScheduler.restoreUpcoming(this)
         if (RecoveryPreferences(this).enabled) scheduleRecoveryChecks()
     }
 
@@ -98,20 +104,23 @@ class MainActivity : Activity() {
 
     private fun render() {
         val notificationReady = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+        val reminderReady = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
         val googleReady = EncryptedAuthStore(this).isConnected()
         val stats = CaptureQueueDatabase(this).stats()
         val syncSnapshot = SyncStatusStore(this).snapshot()
         val staleSync = syncSnapshot.state == "RUNNING" &&
             System.currentTimeMillis() - syncSnapshot.updatedAt > STALE_SYNC_MILLIS
         val syncFailed = syncSnapshot.state in setOf("AUTH_REQUIRED", "API_ERROR") || staleSync
-        val healthy = notificationReady && googleReady && stats.failed == 0 && stats.needsAttention == 0 && !syncFailed
+        val healthy = notificationReady && reminderReady && googleReady && stats.failed == 0 && stats.needsAttention == 0 && !syncFailed
         automationStatus.apply {
             text = if (healthy) "● 自動運転中\n通知を受け取り、空き時間へ配置します" else "● 確認が必要です\n下の案内を確認してください"
             setTextColor(if (healthy) SUCCESS else DANGER)
             setBackgroundColor(if (healthy) SUCCESS_BACKGROUND else WARNING_BACKGROUND)
         }
         renderNextTask()
-        renderSetup(notificationReady, googleReady)
+        renderSetup(notificationReady, reminderReady, googleReady)
         renderAlerts(stats, if (staleSync) "同期が長引いています。再実行してください" else null)
         syncStatus.text = syncStatusText(syncSnapshot)
     }
@@ -126,14 +135,15 @@ class MainActivity : Activity() {
             if (next.recoveryCount > 0) "\n再配置 ${next.recoveryCount}回" else ""
     }
 
-    private fun renderSetup(notificationReady: Boolean, googleReady: Boolean) {
+    private fun renderSetup(notificationReady: Boolean, reminderReady: Boolean, googleReady: Boolean) {
         setup.removeAllViews()
-        if (notificationReady && googleReady) return
+        if (notificationReady && reminderReady && googleReady) return
         setup.addView(section("セットアップ"))
         setup.addView(TextView(this).apply {
             text = when {
                 !notificationReady && !googleReady -> "通知アクセスとGoogle接続を完了してください"
                 !notificationReady -> "通知を自動取得するための許可が必要です"
+                !reminderReady -> "実行時間を知らせる通知の許可が必要です"
                 else -> "TasksとCalendarへ同期するためGoogle接続が必要です"
             }
             textSize = 16f; setTextColor(DANGER)
