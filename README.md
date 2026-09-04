@@ -1,6 +1,10 @@
 # Hisho / 秘書
 
-**Version: 0.32.1 (35)** — Personal use only / 個人利用専用
+**Version: 0.32.2 (36)** — Personal use only / 個人利用専用
+
+0.32.2: ホーム・タスク確認画面に自動更新する同期状況を追加。開始待ち、Google接続、AI判定、Google登録、完了、要確認、エラーと最終更新時刻を表示します。通知の件数は今回の処理分（最大20件）の現在位置です。連打で実行中の同期を中断しないようにし、通信待ちも表示します。確認待ちは引き続き明示的な再判定が必要です。
+
+0.32.2: Live sync status on Home and task review shows queueing, connection, classification, upload, completion, review requirements, errors, and update time. Notification counts describe the current batch (up to 20), not global completion percentages. Repeated sync requests no longer cancel active manual sync. Review items still need explicit reclassification.
 
 0.32.1: AIの最終実行時刻・成功／失敗を表示し、HTTPエラー・通信・応答形式を区別します。AI設定の「架空の通知でAI接続をテスト」は保存済み設定で1件を判定し、Google Tasksには登録しません（API利用料が発生する場合があります）。確認待ちは「今すぐ同期」では再判定されず、各項目の「ルール・AIで再判定」が必要です。
 

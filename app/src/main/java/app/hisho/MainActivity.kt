@@ -88,10 +88,10 @@ class MainActivity : app.hisho.ui.GlassActivity() {
         root.addView(alerts, matchWidth(bottom = 16.dp))
         root.addView(section("同期"))
         syncStatus = TextView(this).apply { textSize = 16f; setTextColor(MUTED) }
-        root.addView(syncStatus, matchWidth(bottom = 8.dp))
+        root.addView(app.hisho.ui.SyncStatusView(this) { render() }, matchWidth(bottom = 8.dp))
         root.addView(Button(this).apply {
             text = "今すぐ同期"
-            setOnClickListener { enqueueSync(); Toast.makeText(this@MainActivity, "同期を開始しました", Toast.LENGTH_SHORT).show() }
+            setOnClickListener { enqueueSync(); Toast.makeText(this@MainActivity, "同期を受け付けました", Toast.LENGTH_SHORT).show() }
         }, matchWidth())
         root.addView(Button(this).apply {
             text = "タスクをすぐ追加"
@@ -186,8 +186,9 @@ class MainActivity : app.hisho.ui.GlassActivity() {
     }
 
     private fun enqueueSync() {
+        SyncStatusStore(this).markQueued()
         WorkManager.getInstance(this).enqueueUniqueWork(
-            CaptureSyncWorker.UNIQUE_WORK_NAME, ExistingWorkPolicy.REPLACE,
+            CaptureSyncWorker.UNIQUE_WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE,
             OneTimeWorkRequestBuilder<CaptureSyncWorker>().setConstraints(networkConstraints()).build(),
         )
     }

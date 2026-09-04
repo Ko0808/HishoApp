@@ -32,9 +32,11 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
                 status.markAuthRequired(); return Result.success()
             }
             val api = GoogleTasksApi(token)
+            status.markRunning("Google Tasksの登録先を確認しています")
             val listId = api.findOrCreateTaskList("Auto Captured Tasks")
             val calendar = GoogleCalendarApi(token)
             val cleanup = applicationContext.getSharedPreferences("legacy_cleanup", Context.MODE_PRIVATE)
+            status.markRunning("削除・完了の変更をGoogleへ反映しています")
             cleanup.getStringSet("requested_ids", emptySet()).orEmpty().toSet().forEach { raw ->
                 val id = raw.toLongOrNull() ?: return@forEach
                 database.legacyEventIds(id).forEach { calendar.deleteEvent(it) }
@@ -53,6 +55,7 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
                 database.markCompleted(request.id)
                 ExecutionReminderScheduler.cancel(applicationContext, request.id)
             }
+            status.markRunning("Google側の完了・削除を確認しています")
             val statuses = api.taskStatuses(listId)
             database.syncTargets().forEach { task ->
                 when (statuses[task.googleTaskId]) {
@@ -60,7 +63,14 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
                     "deleted" -> database.markRemoteDeleted(task.id)
                 }
             }
-            database.pending().forEach { capture ->
+            var registered = 0
+            var ignored = 0
+            var reviewed = 0
+            val pending = database.pending()
+            var position = 0
+            pending.forEach { capture ->
+                position++
+                status.markRunning("通知を処理中 $position / ${pending.size}件（今回の処理分）: ルール確認")
                 if (!database.isPending(capture.id)) return@forEach
                 val configuredRules = FilterPreferences(applicationContext).rules()
                 val rules = FilterRules.decide(configuredRules, capture.sourcePackage, capture.title, capture.body)
@@ -68,6 +78,7 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
                 val manual = capture.sourcePackage == "app.hisho.manual"
                 if (!manual && rules == FilterRules.Decision.EXCLUDE) {
                     database.filterResult(capture.id, "IGNORED", ruleReason)
+                    ignored++
                     return@forEach
                 }
                 val approved = capture.decisionReason == "user_approved" || capture.decisionReason == "user_correction" || capture.decisionReason.startsWith("ai_task:")
@@ -78,11 +89,14 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
                 } else if (!manual && !approved) {
                     if (capture.title.isBlank() && capture.body.isBlank()) {
                         database.filterResult(capture.id, "REVIEW", "通知本文が残っていないため確認が必要")
+                        reviewed++
                         return@forEach
                     }
+                    status.markRunning("通知を処理中 $position / ${pending.size}件: AIの判定を待っています")
                     val decision = SmartNotificationFilter(applicationContext).classify(capture.sourcePackage, capture.title, capture.body)
                     if (decision.verdict != "task") {
                         database.filterResult(capture.id, if (decision.verdict == "ignore") "IGNORED" else "REVIEW", decision.reason)
+                        if (decision.verdict == "ignore") ignored++ else reviewed++
                         return@forEach
                     }
                     title = decision.title
@@ -92,6 +106,7 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
                 val finalRule = FilterRules.decide(FilterPreferences(applicationContext).rules(), capture.sourcePackage, capture.title, capture.body)
                 if (!manual && finalRule == FilterRules.Decision.EXCLUDE) {
                     database.filterResult(capture.id, "IGNORED", "更新された除外ルールにより登録を停止")
+                    ignored++
                     return@forEach
                 }
                 if (!manual && finalRule == FilterRules.Decision.FORCE) {
@@ -99,16 +114,19 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
                     database.filterResult(capture.id, "PENDING", FilterRules.explanation(FilterPreferences(applicationContext).rules(), capture.sourcePackage, capture.title, capture.body), title, "HIGH")
                 }
                 try {
+                    status.markRunning("通知を処理中 $position / ${pending.size}件: Google Tasksへ登録しています")
                     val marker = "Hisho capture: ${capture.dedupKey}"
                     val existing = api.findTaskByMarker(listId, marker)
                     val task = existing ?: api.createTask(listId, title, marker, TaskDueDate.format(capture.deadlineEpochMillis))
                     if (existing != null) api.updateTask(listId, task.id, title, TaskDueDate.format(capture.deadlineEpochMillis))
                     database.markSynced(capture.id, task.id)
+                    registered++
                     if (statuses[task.id] == "completed") database.markCompleted(capture.id)
                 } catch (error: IOException) {
                     database.markRetry(capture.id, error.javaClass.simpleName); throw error
                 }
             }
+            status.markRunning("登録済みタスクの編集内容を反映しています")
             database.unscheduled().forEach { task ->
                 val detail = database.taskDetail(task.id) ?: return@forEach
                 api.updateTask(listId, task.googleTaskId, detail.actionTitle, TaskDueDate.format(detail.deadlineEpochMillis))
@@ -117,7 +135,11 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
             if (database.stats().pending > 0 || database.unscheduled(1).isNotEmpty() ||
                 database.completionRequests(1).isNotEmpty() || database.deletionRequests(1).isNotEmpty()) {
                 status.markWaiting(); Result.retry()
-            } else { status.markSuccess(); Result.success() }
+            } else {
+                val attention = database.stats().needsAttention
+                status.markSuccess("今回: 登録 $registered 件・除外 $ignored 件・確認待ち $reviewed 件\n要確認は全体で $attention 件。確認待ちは詳細・操作から再判定できます。", attention > 0)
+                Result.success()
+            }
         } catch (error: GoogleTasksApi.HttpFailure) {
             if (error.status == 401) { EncryptedAuthStore(applicationContext).clear(); status.markAuthRequired() }
             else status.markApiError("Google Tasks", error.status)
@@ -126,6 +148,10 @@ class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineW
             status.markApiError("Calendarの既存予定整理", error.status); Result.retry()
         } catch (_: IOException) {
             status.markNetworkError(); Result.retry()
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            status.markInterrupted(); throw error
+        } catch (_: Exception) {
+            status.markUnexpectedError(); Result.failure()
         }
     }
 

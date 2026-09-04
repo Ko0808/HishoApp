@@ -59,6 +59,7 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
             setPadding(0, 8.dp, 0, 16.dp)
         })
 
+        root.addView(app.hisho.ui.SyncStatusView(this) { root.post { render() } })
         root.addView(Button(this).apply {
             text = "今すぐ同期"
             setOnClickListener { enqueueSync() }
@@ -396,12 +397,13 @@ class MetadataActivity : app.hisho.ui.GlassActivity() {
     }
 
     private fun enqueueSync() {
+        app.hisho.sync.SyncStatusStore(this).markQueued()
         WorkManager.getInstance(this).enqueueUniqueWork(
             CaptureSyncWorker.UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
-            OneTimeWorkRequestBuilder<CaptureSyncWorker>().build(),
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
+            OneTimeWorkRequestBuilder<CaptureSyncWorker>().setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build()).build(),
         )
-        Toast.makeText(this, "同期を開始しました", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "同期を受け付けました。上部に進行状況を表示します", Toast.LENGTH_SHORT).show()
     }
 
     private fun sourceLabel(packageName: String): String = when (packageName) {
