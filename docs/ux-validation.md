@@ -1,5 +1,7 @@
 # UI/UX改善の検証 / UX validation — 0.30.0
 
+この文書は0.30.0の履歴です。0.31.0ではCalendar配置・時間枠通知を停止しています。現在の検証項目は[スマートフィルター検証](smart-filter-validation.md)を参照してください。
+
 残りの改善Phase 2〜5の実装を統合。コード実装と実機の動作保証は分けて扱います。
 Remaining UX phases 2–5 are implemented together; implementation is not a claim of complete device validation.
 

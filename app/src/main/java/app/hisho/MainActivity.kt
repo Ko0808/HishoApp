@@ -49,8 +49,8 @@ class MainActivity : Activity() {
         title = getString(R.string.app_name)
         setContentView(content())
         schedulePeriodicSync()
-        ExecutionReminderScheduler.restoreUpcoming(this)
-        if (RecoveryPreferences(this).enabled) scheduleRecoveryChecks()
+        WorkManager.getInstance(this).cancelUniqueWork(TaskRecoveryWorker.UNIQUE_WORK_NAME)
+        CaptureQueueDatabase(this).legacyTargets().forEach { ExecutionReminderScheduler.cancel(this, it.first) }
     }
 
     override fun onResume() {
@@ -71,7 +71,7 @@ class MainActivity : Activity() {
         })
         automationStatus = TextView(this).apply { textSize = 18f; setPadding(16.dp, 14.dp, 16.dp, 14.dp) }
         root.addView(automationStatus, matchWidth(bottom = 20.dp))
-        root.addView(section("次にやること"))
+        root.addView(section("Google Tasksの未完了タスク"))
         nextTask = TextView(this).apply {
             textSize = 20f; setTextColor(INK); setPadding(16.dp, 16.dp, 16.dp, 16.dp)
             maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END
@@ -79,7 +79,7 @@ class MainActivity : Activity() {
         }
         root.addView(nextTask, matchWidth(bottom = 8.dp))
         root.addView(Button(this).apply {
-            text = "Google Calendarで見る"; setOnClickListener { openCalendar() }
+            text = "Google Tasksを開く"; setOnClickListener { openCalendar() }
         }, matchWidth(bottom = 20.dp))
         setup = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(setup, matchWidth())
@@ -105,9 +105,7 @@ class MainActivity : Activity() {
 
     private fun render() {
         val notificationReady = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
-        val reminderReady = NotificationManagerCompat.from(this).areNotificationsEnabled() &&
-            (getSystemService(android.app.NotificationManager::class.java).getNotificationChannel("hisho_execution_reminders")?.importance
-                != android.app.NotificationManager.IMPORTANCE_NONE)
+        val reminderReady = app.hisho.ai.AiPreferences(this).filterReady()
         val googleReady = EncryptedAuthStore(this).isConnected()
         val stats = CaptureQueueDatabase(this).stats()
         val syncSnapshot = SyncStatusStore(this).snapshot()
@@ -116,7 +114,7 @@ class MainActivity : Activity() {
         val syncFailed = syncSnapshot.state in setOf("AUTH_REQUIRED", "API_ERROR") || staleSync
         val healthy = notificationReady && reminderReady && googleReady && stats.failed == 0 && stats.needsAttention == 0 && !syncFailed
         automationStatus.apply {
-            text = if (healthy) "● 自動運転中\n通知を受け取り、空き時間へ配置します" else "● 確認が必要です\n下の案内を確認してください"
+            text = if (healthy) "● スマートフィルター稼働中\n必要な通知だけGoogle Tasksへ登録します" else "● 設定・確認が必要です\n不明な通知は自動登録しません"
             setTextColor(if (healthy) SUCCESS else DANGER)
             setBackgroundColor(if (healthy) SUCCESS_BACKGROUND else WARNING_BACKGROUND)
         }
@@ -129,25 +127,21 @@ class MainActivity : Activity() {
     private fun renderNextTask() {
         val now = System.currentTimeMillis()
         val database = CaptureQueueDatabase(this)
-        val block = database.upcomingCalendarBlocks(now, 1).firstOrNull()
-        val next = block?.let { database.taskDetail(it.captureId) }
-        nextTask.text = if (next == null) "現在、配置済みの予定はありません\n未同期のタスクは下の「対応が必要」で確認できます"
-        else "${if (block.startEpochMillis <= now) "今の作業枠  •  " else ""}${formatDateTime(block.startEpochMillis)}\n${next.actionTitle}" +
-            if (next.recoveryCount > 0) "\n再配置 ${next.recoveryCount}回" else ""
+        val tasks = database.recentMetadata(5, states = setOf("SYNCED"))
+        nextTask.text = if (tasks.isEmpty()) "同期済みの未完了タスクはありません" else tasks.joinToString("\n") { it.actionTitle }
     }
 
     private fun renderSetup(notificationReady: Boolean, reminderReady: Boolean, googleReady: Boolean) {
         setup.removeAllViews()
         val progress = getSharedPreferences("onboarding", MODE_PRIVATE)
-        if (notificationReady && reminderReady && googleReady && progress.getBoolean("hours_confirmed", false) && progress.getBoolean("recovery_confirmed", false)) return
+        if (notificationReady && reminderReady && googleReady) return
         setup.addView(section("セットアップ"))
         setup.addView(TextView(this).apply {
             text = when {
                 !notificationReady && !googleReady -> "通知アクセスとGoogle接続を完了してください"
                 !notificationReady -> "通知を自動取得するための許可が必要です"
-                !reminderReady -> "実行時間を知らせる通知の許可が必要です"
-                !googleReady -> "TasksとCalendarへ同期するためGoogle接続が必要です"
-                else -> "稼働時間と自動再配置の設定を確認しましょう"
+                !reminderReady -> "除外・最優先ルールを設定し、AI本文フィルターを有効にしてください"
+                else -> "Google Tasksへ同期するため接続が必要です"
             }
             textSize = 16f; setTextColor(DANGER)
         })
@@ -161,11 +155,11 @@ class MainActivity : Activity() {
         alerts.removeAllViews()
         val now = System.currentTimeMillis()
         val atRisk = CaptureQueueDatabase(this).dashboardTasks().count {
-            it.state == "SYNCED" && ScheduleHealth.isAtRisk(now, it.deadlineEpochMillis, it.scheduledEndEpochMillis)
+            it.state == "SYNCED" && it.deadlineEpochMillis != null && it.deadlineEpochMillis < now
         }
         val messages = buildList {
             if (syncWarning != null) add(syncWarning)
-            if (stats.needsAttention > 0) add("再配置できず確認が必要: ${stats.needsAttention}件")
+            if (stats.needsAttention > 0) add("登録前の確認待ち・要確認: ${stats.needsAttention}件")
             if (stats.failed > 0) add("同期に失敗: ${stats.failed}件")
             if (atRisk > 0) add("期限に間に合わない可能性: ${atRisk}件")
             if (stats.pending > 0) add("同期を待っているタスク: ${stats.pending}件")
@@ -185,9 +179,10 @@ class MainActivity : Activity() {
     }
 
     private fun openCalendar() {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("content://com.android.calendar/time/${System.currentTimeMillis()}"))
+        val intent = packageManager.getLaunchIntentForPackage("com.google.android.apps.tasks")
+            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://tasks.google.com"))
         try { startActivity(intent) }
-        catch (_: ActivityNotFoundException) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://calendar.google.com"))) }
+        catch (_: ActivityNotFoundException) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://tasks.google.com"))) }
     }
 
     private fun enqueueSync() {

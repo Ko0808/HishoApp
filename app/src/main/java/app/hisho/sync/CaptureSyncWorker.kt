@@ -3,346 +3,134 @@ package app.hisho.sync
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import app.hisho.ai.SmartNotificationFilter
 import app.hisho.auth.EncryptedAuthStore
 import app.hisho.auth.GoogleTasksTokenProvider
-import app.hisho.ai.OpenAiSchedulingAdvisor
-import app.hisho.ai.AnonymousAvailabilityCalculator
 import app.hisho.data.CaptureQueueDatabase
-import app.hisho.intelligence.ActionTitleGenerator
+import app.hisho.intelligence.FilterPreferences
+import app.hisho.intelligence.FilterRules
 import app.hisho.notification.ExecutionReminderScheduler
-import app.hisho.scheduling.DeterministicScheduler
-import app.hisho.scheduling.SchedulingPreferences
-import app.hisho.scheduling.TaskBlockPlanner
-import app.hisho.scheduling.ScheduleExplanationStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
-import java.time.temporal.ChronoUnit
+import java.time.ZoneOffset
 
-/**
- * Durable seam for Phase 1 Google Tasks synchronization.
- * Until OAuth is configured, encrypted queue entries intentionally remain pending.
- */
-class CaptureSyncWorker(
-    context: Context,
-    params: WorkerParameters,
-) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result {
-        val statusStore = SyncStatusStore(applicationContext)
-        statusStore.markRunning()
-        val authStore = EncryptedAuthStore(applicationContext)
-        val token = try {
-            GoogleTasksTokenProvider(applicationContext).accessToken()
-        } catch (_: IOException) {
-            statusStore.markNetworkError()
-            return Result.retry()
-        } ?: run {
-            statusStore.markAuthRequired()
-            return Result.success()
-        }
+/** Calendar is accessed only for explicit legacy cleanup/deletion, never creation. */
+class CaptureSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result = withContext(Dispatchers.IO) { mutex.withLock { sync() } }
+
+    private suspend fun sync(): Result {
+        val status = SyncStatusStore(applicationContext)
+        status.markRunning()
         val database = CaptureQueueDatabase(applicationContext)
-        val tasksApi = GoogleTasksApi(token)
-        val calendarApi = GoogleCalendarApi(token)
-        val schedulingPreferences = SchedulingPreferences(applicationContext)
-        val scheduler = schedulingPreferences.scheduler()
-
         return try {
-            val taskListId = tasksApi.findOrCreateTaskList(TASK_LIST_TITLE)
+            val token = GoogleTasksTokenProvider(applicationContext).accessToken() ?: run {
+                status.markAuthRequired(); return Result.success()
+            }
+            val api = GoogleTasksApi(token)
+            val listId = api.findOrCreateTaskList("Auto Captured Tasks")
+            val calendar = GoogleCalendarApi(token)
+            val cleanup = applicationContext.getSharedPreferences("legacy_cleanup", Context.MODE_PRIVATE)
+            cleanup.getStringSet("requested_ids", emptySet()).orEmpty().toSet().forEach { raw ->
+                val id = raw.toLongOrNull() ?: return@forEach
+                database.legacyEventIds(id).forEach { calendar.deleteEvent(it) }
+                database.detachLegacyEvents(id)
+                ExecutionReminderScheduler.cancel(applicationContext, id)
+                cleanup.edit().putStringSet("requested_ids", cleanup.getStringSet("requested_ids", emptySet()).orEmpty() - raw).commit()
+            }
             database.deletionRequests().forEach { request ->
-                ExecutionReminderScheduler.cancel(applicationContext, request.id)
-                database.calendarBlocks(request.id).forEach { block ->
-                    calendarApi.deleteEvent(block.calendarEventId)
-                }
-                request.googleTaskId?.let { tasksApi.deleteTask(taskListId, it) }
+                database.legacyEventIds(request.id).forEach { calendar.deleteEvent(it) }
+                request.googleTaskId?.let { api.deleteTask(listId, it) }
                 database.markDeleted(request.id)
+                ExecutionReminderScheduler.cancel(applicationContext, request.id)
             }
             database.completionRequests().forEach { request ->
-                ExecutionReminderScheduler.cancel(applicationContext, request.id)
-                tasksApi.completeTask(taskListId, request.googleTaskId)
+                api.completeTask(listId, request.googleTaskId)
                 database.markCompleted(request.id)
+                ExecutionReminderScheduler.cancel(applicationContext, request.id)
             }
-            reconcileCalendarBlocks(calendarApi, database)
-            ExecutionReminderScheduler.restoreUpcoming(applicationContext)
-            val pending = database.pending()
-            val advisor = OpenAiSchedulingAdvisor(applicationContext)
-            val availability = if (advisor.isEnabled() && pending.isNotEmpty()) {
-                val now = Instant.now()
-                AnonymousAvailabilityCalculator.calculate(
-                    schedulingPreferences,
-                    calendarApi.busyIntervals(now, now.plus(8, ChronoUnit.DAYS), ZoneId.systemDefault()),
-                    now,
-                )
-            } else emptyList()
-            advisor.plan(pending, availability).forEach { planned ->
-                syncCapture(
-                    tasksApi, calendarApi, scheduler, database, taskListId,
-                    planned.capture, planned.maximumBlockMinutes,
-                )
+            val statuses = api.taskStatuses(listId)
+            database.syncTargets().forEach { task ->
+                when (statuses[task.googleTaskId]) {
+                    "completed" -> database.markCompleted(task.id)
+                    "deleted" -> database.markRemoteDeleted(task.id)
+                }
             }
-            database.unscheduled().forEach { capture ->
-                scheduleExisting(tasksApi, calendarApi, scheduler, database, taskListId, capture)
+            database.pending().forEach { capture ->
+                if (!database.isPending(capture.id)) return@forEach
+                val configuredRules = FilterPreferences(applicationContext).rules()
+                val rules = FilterRules.decide(configuredRules, capture.sourcePackage, capture.title, capture.body)
+                val ruleReason = FilterRules.explanation(configuredRules, capture.sourcePackage, capture.title, capture.body)
+                val manual = capture.sourcePackage == "app.hisho.manual"
+                if (!manual && rules == FilterRules.Decision.EXCLUDE) {
+                    database.filterResult(capture.id, "IGNORED", ruleReason)
+                    return@forEach
+                }
+                val approved = capture.decisionReason == "user_approved" || capture.decisionReason == "user_correction" || capture.decisionReason.startsWith("ai_task:")
+                var title = capture.actionTitle
+                if (!manual && rules == FilterRules.Decision.FORCE) {
+                    title = "【最優先】" + title.removePrefix("【最優先】").take(54)
+                    database.filterResult(capture.id, "PENDING", ruleReason, title, "HIGH")
+                } else if (!manual && !approved) {
+                    if (capture.title.isBlank() && capture.body.isBlank()) {
+                        database.filterResult(capture.id, "REVIEW", "通知本文が残っていないため確認が必要")
+                        return@forEach
+                    }
+                    val decision = SmartNotificationFilter(applicationContext).classify(capture.sourcePackage, capture.title, capture.body)
+                    if (decision.verdict != "task") {
+                        database.filterResult(capture.id, if (decision.verdict == "ignore") "IGNORED" else "REVIEW", decision.reason)
+                        return@forEach
+                    }
+                    title = decision.title
+                    database.filterResult(capture.id, "PENDING", "ai_task: ${decision.reason}", title, "NORMAL")
+                }
+                if (!database.isPending(capture.id)) return@forEach
+                val finalRule = FilterRules.decide(FilterPreferences(applicationContext).rules(), capture.sourcePackage, capture.title, capture.body)
+                if (!manual && finalRule == FilterRules.Decision.EXCLUDE) {
+                    database.filterResult(capture.id, "IGNORED", "更新された除外ルールにより登録を停止")
+                    return@forEach
+                }
+                if (!manual && finalRule == FilterRules.Decision.FORCE) {
+                    title = "【最優先】" + title.removePrefix("【最優先】").take(54)
+                    database.filterResult(capture.id, "PENDING", FilterRules.explanation(FilterPreferences(applicationContext).rules(), capture.sourcePackage, capture.title, capture.body), title, "HIGH")
+                }
+                try {
+                    val marker = "Hisho capture: ${capture.dedupKey}"
+                    val existing = api.findTaskByMarker(listId, marker)
+                    val task = existing ?: api.createTask(listId, title, marker, TaskDueDate.format(capture.deadlineEpochMillis))
+                    if (existing != null) api.updateTask(listId, task.id, title, TaskDueDate.format(capture.deadlineEpochMillis))
+                    database.markSynced(capture.id, task.id)
+                    if (statuses[task.id] == "completed") database.markCompleted(capture.id)
+                } catch (error: IOException) {
+                    database.markRetry(capture.id, error.javaClass.simpleName); throw error
+                }
             }
-            if (database.stats().pending > 0 || database.unscheduled(1).isNotEmpty()) {
-                statusStore.markWaiting()
-                Result.retry()
-            } else {
-                statusStore.markSuccess()
-                Result.success()
+            database.unscheduled().forEach { task ->
+                val detail = database.taskDetail(task.id) ?: return@forEach
+                api.updateTask(listId, task.googleTaskId, detail.actionTitle, TaskDueDate.format(detail.deadlineEpochMillis))
+                database.markSynced(task.id, task.googleTaskId)
             }
+            if (database.stats().pending > 0 || database.unscheduled(1).isNotEmpty() ||
+                database.completionRequests(1).isNotEmpty() || database.deletionRequests(1).isNotEmpty()) {
+                status.markWaiting(); Result.retry()
+            } else { status.markSuccess(); Result.success() }
         } catch (error: GoogleTasksApi.HttpFailure) {
-            if (error.status == 401) {
-                authStore.clear()
-                statusStore.markAuthRequired()
-            } else {
-                statusStore.markApiError("Google Tasks", error.status)
-            }
+            if (error.status == 401) { EncryptedAuthStore(applicationContext).clear(); status.markAuthRequired() }
+            else status.markApiError("Google Tasks", error.status)
             Result.retry()
         } catch (error: GoogleCalendarApi.HttpFailure) {
-            if (error.status == 401) {
-                authStore.clear()
-                statusStore.markAuthRequired()
-            } else statusStore.markApiError("Google Calendar", error.status)
-            Result.retry()
+            status.markApiError("Calendarの既存予定整理", error.status); Result.retry()
         } catch (_: IOException) {
-            statusStore.markNetworkError()
-            Result.retry()
-        }
-    }
-
-    private fun reconcileCalendarBlocks(
-        calendarApi: GoogleCalendarApi,
-        database: CaptureQueueDatabase,
-    ) {
-        database.calendarBlocksToCheck().forEach { block ->
-            val event = calendarApi.getEventOrNull(block.calendarEventId)
-            val previous = database.calendarBlocks(block.captureId).firstOrNull { it.calendarEventId == block.calendarEventId }
-            if (event == null || previous == null || previous.startEpochMillis != event.start.toEpochMilli() || previous.endEpochMillis != event.end.toEpochMilli()) {
-                ExecutionReminderScheduler.cancel(applicationContext, block.captureId)
-            }
-            if (event == null) database.markCalendarBlockMissing(block.captureId, block.calendarEventId)
-            else database.updateCalendarBlock(
-                block.captureId,
-                block.calendarEventId,
-                event.start.toEpochMilli(),
-                event.end.toEpochMilli(),
-            )
-        }
-    }
-
-    private fun syncCapture(
-        tasksApi: GoogleTasksApi,
-        calendarApi: GoogleCalendarApi,
-        scheduler: DeterministicScheduler,
-        database: CaptureQueueDatabase,
-        taskListId: String,
-        capture: CaptureQueueDatabase.PendingCapture,
-        maximumBlockMinutes: Int,
-    ) {
-        val marker = "Hisho capture: ${capture.dedupKey}"
-        try {
-            val conciseTitle = capture.actionTitle.ifBlank {
-                ActionTitleGenerator.generate(capture.title, capture.body, capture.sourcePackage)
-            }
-            val existing = tasksApi.findTaskByMarker(taskListId, marker)
-            val task = existing ?: tasksApi.createTask(
-                taskListId = taskListId,
-                title = conciseTitle,
-                notes = buildString {
-                    if (capture.title.isNotBlank() && capture.title != capture.body) {
-                        append(capture.title)
-                        append("\n\n")
-                    }
-                    append("Captured from ${capture.sourcePackage}\n")
-                    append(marker)
-                },
-                due = capture.deadlineEpochMillis?.let { Instant.ofEpochMilli(it).toString() },
-            )
-            if (existing != null) tasksApi.updateTaskTitle(taskListId, task.id, conciseTitle)
-            val events = scheduleBlocks(
-                calendarApi,
-                scheduler,
-                capture.dedupKey,
-                task.id,
-                conciseTitle,
-                capture.effortMinutes,
-                capture.deadlineEpochMillis,
-                capture.recoveryCount,
-                maximumBlockMinutes,
-            )
-            database.markScheduled(
-                capture.id,
-                task.id,
-                events.first().id,
-                events.first().start.toEpochMilli(),
-                events.last().end.toEpochMilli(),
-                scrubPayload = true,
-                scheduledBlockCount = events.size,
-            )
-            database.replaceCalendarBlocks(capture.id, events.toBlockRecords(capture.recoveryCount))
-            scheduleExecutionReminders(capture.id, events)
-        } catch (error: Exception) {
-            database.markRetry(capture.id, error.javaClass.simpleName)
-            throw error
-        }
-    }
-
-    private fun scheduleExisting(
-        tasksApi: GoogleTasksApi,
-        calendarApi: GoogleCalendarApi,
-        scheduler: DeterministicScheduler,
-        database: CaptureQueueDatabase,
-        taskListId: String,
-        capture: CaptureQueueDatabase.UnscheduledCapture,
-    ) {
-        val task = tasksApi.getTask(taskListId, capture.googleTaskId)
-        val metadata = database.recentMetadata(100).firstOrNull { it.id == capture.id }
-        val conciseTitle = metadata?.actionTitle?.ifBlank { null }
-            ?: ActionTitleGenerator.generate("", task.title)
-        tasksApi.updateTask(
-            taskListId,
-            task.id,
-            conciseTitle,
-            capture.deadlineEpochMillis?.let { Instant.ofEpochMilli(it).toString() },
-        )
-        var recoveryCount = capture.recoveryCount
-        if (capture.rescheduleRequested) {
-            deleteScheduledBlocks(calendarApi, database, capture)
-            database.beginRequestedReschedule(capture.id)
-            recoveryCount += 1
-        }
-        val events = scheduleBlocks(
-            calendarApi,
-            scheduler,
-            capture.dedupKey,
-            task.id,
-            conciseTitle,
-            capture.effortMinutes,
-            capture.deadlineEpochMillis,
-            recoveryCount,
-        )
-        database.markScheduled(
-            capture.id,
-            task.id,
-            events.first().id,
-            events.first().start.toEpochMilli(),
-            events.last().end.toEpochMilli(),
-            scrubPayload = false,
-            scheduledBlockCount = events.size,
-        )
-        database.replaceCalendarBlocks(capture.id, events.toBlockRecords(recoveryCount))
-        scheduleExecutionReminders(capture.id, events)
-    }
-
-    private fun deleteScheduledBlocks(
-        calendarApi: GoogleCalendarApi,
-        database: CaptureQueueDatabase,
-        capture: CaptureQueueDatabase.UnscheduledCapture,
-    ) {
-        val tracked = database.calendarBlocks(capture.id)
-        if (tracked.isNotEmpty()) {
-            tracked.forEach { calendarApi.deleteEvent(it.calendarEventId) }
-            database.clearCalendarBlocks(capture.id)
-            return
-        }
-        val from = Instant.now().minus(30, ChronoUnit.DAYS)
-        val identifiers = buildList {
-            add(capture.dedupKey) // Compatibility with schedules created before block splitting.
-            repeat(capture.scheduledBlockCount) { index ->
-                add("${capture.dedupKey}:recovery:${capture.recoveryCount}:block:${index + 1}")
-            }
-        }
-        identifiers.distinct().forEach { identifier ->
-            calendarApi.findEvent(identifier, from)?.let { calendarApi.deleteEvent(it.id) }
-        }
-    }
-
-    private fun List<GoogleCalendarApi.CalendarEvent>.toBlockRecords(
-        generation: Int,
-    ): List<CaptureQueueDatabase.CalendarBlock> = sortedBy { it.start }.mapIndexed { index, event ->
-        CaptureQueueDatabase.CalendarBlock(
-            blockIndex = index + 1,
-            generation = generation,
-            calendarEventId = event.id,
-            startEpochMillis = event.start.toEpochMilli(),
-            endEpochMillis = event.end.toEpochMilli(),
-        )
-    }
-
-    private fun scheduleExecutionReminders(
-        captureId: Long,
-        events: List<GoogleCalendarApi.CalendarEvent>,
-    ) {
-        ExecutionReminderScheduler.cancel(applicationContext, captureId)
-        events.sortedBy { it.start }.forEachIndexed { index, event ->
-            ExecutionReminderScheduler.schedule(
-                applicationContext,
-                captureId,
-                index + 1,
-                event.start.toEpochMilli(),
-            )
-        }
-    }
-
-    private fun scheduleBlocks(
-        calendarApi: GoogleCalendarApi,
-        scheduler: DeterministicScheduler,
-        captureId: String,
-        googleTaskId: String,
-        title: String,
-        effortMinutes: Int,
-        deadlineEpochMillis: Long?,
-        recoveryCount: Int,
-        maximumBlockMinutes: Int = 60,
-    ): List<GoogleCalendarApi.CalendarEvent> {
-        val blocks = TaskBlockPlanner.split(effortMinutes, maximumBlockMinutes)
-        val events = mutableListOf<GoogleCalendarApi.CalendarEvent>()
-        blocks.forEachIndexed { index, blockMinutes ->
-            val blockId = "$captureId:recovery:$recoveryCount:block:${index + 1}"
-            val now = Instant.now()
-            calendarApi.findEvent(blockId, now.minus(1, ChronoUnit.DAYS))?.let {
-                events += it
-                return@forEachIndexed
-            }
-            val partTitle = if (blocks.size == 1) title else "$title (${index + 1}/${blocks.size})"
-            val blockTitle = if (recoveryCount == 0) partTitle else "$partTitle [再計画$recoveryCount]"
-            events += scheduleBlock(
-                calendarApi, scheduler, blockId, googleTaskId, blockTitle,
-                blockMinutes, deadlineEpochMillis, now,
-            )
-        }
-        return events.sortedBy { it.start }
-    }
-
-    private fun scheduleBlock(
-        calendarApi: GoogleCalendarApi,
-        scheduler: DeterministicScheduler,
-        captureId: String,
-        googleTaskId: String,
-        title: String,
-        effortMinutes: Int,
-        deadlineEpochMillis: Long?,
-        now: Instant,
-    ): GoogleCalendarApi.CalendarEvent {
-        val zoneId = ZoneId.systemDefault()
-        val horizon = maxOf(
-            now.plus(8, ChronoUnit.DAYS),
-            deadlineEpochMillis?.let(Instant::ofEpochMilli) ?: now,
-        )
-        val busy = calendarApi.busyIntervals(now, horizon, zoneId)
-        val slot = scheduler.findSlot(
-            now = now,
-            durationMinutes = effortMinutes,
-            deadline = deadlineEpochMillis?.let(Instant::ofEpochMilli),
-            busy = busy,
-        ) ?: throw IOException("No schedulable Calendar slot")
-        return calendarApi.createEvent(captureId, googleTaskId, title, slot, zoneId).also { event ->
-            ScheduleExplanationStore(applicationContext).save(event.id, event.start.toEpochMilli(), event.end.toEpochMilli(),
-                scheduler.explanation(slot, deadlineEpochMillis?.let(Instant::ofEpochMilli)))
+            status.markNetworkError(); Result.retry()
         }
     }
 
     companion object {
         const val UNIQUE_WORK_NAME = "capture-to-google-tasks"
-        private const val TASK_LIST_TITLE = "Auto Captured Tasks"
+        private val mutex = Mutex()
     }
 }

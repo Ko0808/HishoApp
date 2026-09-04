@@ -55,7 +55,7 @@ class MetadataActivity : Activity() {
             setTextColor(Color.rgb(24, 39, 34))
         })
         root.addView(TextView(this).apply {
-            text = "対応が必要なタスクをまとめました。通常の予定はCalendarで確認できます。編集は「詳細・操作」から行えます。"
+            text = "AIの確認待ちは「詳細・操作」から承認・除外・再判定できます。登録済みはGoogle Tasksで完了できます。"
             setPadding(0, 8.dp, 0, 16.dp)
         })
 
@@ -179,18 +179,26 @@ class MetadataActivity : Activity() {
         val labels = mutableListOf<String>()
         val actions = mutableListOf<() -> Unit>()
         fun option(label: String, action: () -> Unit) { labels += label; actions += action }
-        option("配置時刻と詳細を見る") { showTaskDetail(item.id) }
+        option("判定理由と詳細を見る") { showTaskDetail(item.id) }
+        if (item.state == "REVIEW") {
+            option("元の通知を読む") {
+                AlertDialog.Builder(this).setTitle("元の通知（最大4000文字）").setMessage(database.notificationPreview(item.id)).setPositiveButton("閉じる", null).show()
+            }
+            option("確認してタスクに登録") { database.approveReview(item.id); enqueueSync(); render() }
+            option("ルール・AIで再判定") { database.retryReview(item.id); enqueueSync(); render() }
+            option("不要として除外") { database.filterResult(item.id, "IGNORED", "ユーザーが除外"); render() }
+        }
         if (item.state == "NEEDS_ATTENTION") {
-            option("自動再配置を再開") { database.restartRecovery(item.id); enqueueSync(); render() }
+            option("Google同期を再実行") { enqueueSync() }
         }
         if (item.state in setOf("SYNCED", "NEEDS_ATTENTION")) {
             option("完了にする") { database.requestCompletion(item.id); enqueueSync(); render() }
         }
         if (item.state == "SYNCED") {
-            option("空き時間へ再配置") { database.requestReschedule(item.id); enqueueSync(); render() }
+            option("Googleへ編集内容を同期") { database.requestReschedule(item.id); enqueueSync(); render() }
         }
         if (item.state in setOf("PENDING", "RETRY")) option("同期を再実行") { enqueueSync() }
-        if (item.state in setOf("PENDING", "RETRY", "SYNCED", "IGNORED")) {
+        if (item.state in setOf("PENDING", "RETRY", "SYNCED", "IGNORED", "REVIEW")) {
             option("名前を編集") { showTitleEditor(item.id, item.actionTitle) }
             option("工数を変更（現在 ${item.effort}）") { database.cycleEffort(item.id); enqueueSync(); render() }
             option("優先度を変更（現在 ${priorityLabel(item.priority)}）") { database.cyclePriority(item.id); enqueueSync(); render() }
@@ -307,6 +315,7 @@ class MetadataActivity : Activity() {
     private fun showTaskDetail(id: Long) {
         val detail = database.taskDetail(id) ?: return
         val message = buildString {
+            append("判定理由: ${database.recentMetadata(10000).firstOrNull { it.id == id }?.reason ?: "記録なし"}\n")
             append("状態: ${stateLabel(detail.state)}")
             append("\n通知元: ${sourceLabel(detail.sourcePackage)}")
             append("\n工数: ${detail.effort}  /  優先度: ${priorityLabel(detail.priority)}")
@@ -405,13 +414,14 @@ class MetadataActivity : Activity() {
     }
 
     private fun stateLabel(state: String): String = when (state) {
+        "REVIEW" -> "登録前の確認待ち"
         "PENDING" -> "未同期"
         "RETRY" -> "再試行待ち"
         "SYNCED" -> "同期済み"
         "COMPLETED" -> "完了"
         "IGNORED" -> "除外"
         "FAILED" -> "同期失敗"
-        "NEEDS_ATTENTION" -> "再配置の確認が必要"
+        "NEEDS_ATTENTION" -> "旧タスクの確認が必要"
         "COMPLETE_REQUESTED" -> "完了を同期中"
         "DELETE_REQUESTED" -> "削除を同期中"
         else -> state
@@ -441,7 +451,8 @@ class MetadataActivity : Activity() {
         ALL("すべて", emptySet()),
         PENDING("未同期", setOf("PENDING", "RETRY")),
         SYNCED("同期済み", setOf("SYNCED", "COMPLETE_REQUESTED")),
-        ATTENTION("要確認", setOf("NEEDS_ATTENTION", "FAILED")),
+        ATTENTION("要確認", setOf("NEEDS_ATTENTION", "FAILED", "REVIEW")),
+        IGNORED("除外履歴", setOf("IGNORED")),
         COMPLETED("完了", setOf("COMPLETED"));
 
         fun next(): TaskFilter = entries[(ordinal + 1) % entries.size]

@@ -51,6 +51,22 @@ class GoogleTasksApi(private val accessToken: String) {
         return null
     }
 
+    fun taskStatuses(taskListId: String): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        var page: String? = null
+        do {
+            val response = request("GET", "/tasks/v1/lists/${Uri.encode(taskListId)}/tasks?maxResults=100&showCompleted=true&showHidden=true&showDeleted=true" +
+                (page?.let { "&pageToken=${Uri.encode(it)}" } ?: ""))
+            val tasks = response.optJSONArray("items") ?: JSONArray()
+            for (i in 0 until tasks.length()) {
+                val task = tasks.getJSONObject(i)
+                result[task.getString("id")] = if (task.optBoolean("deleted")) "deleted" else task.optString("status")
+            }
+            page = response.optString("nextPageToken").ifBlank { null }
+        } while (page != null)
+        return result
+    }
+
     fun createTask(taskListId: String, title: String, notes: String, due: String?): CreatedTask {
         val task = JSONObject().put("title", title).put("notes", notes)
         due?.let { task.put("due", it) }

@@ -18,6 +18,7 @@ import app.hisho.data.CaptureQueueDatabase
 
 class ExecutionReminderWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     override fun doWork(): Result {
+        if (app.hisho.BuildConfig.VERSION_CODE >= 33) return Result.success()
         val captureId = inputData.getLong(KEY_CAPTURE_ID, -1)
         val blockIndex = inputData.getInt(KEY_BLOCK_INDEX, -1)
         val expectedStart = inputData.getLong(KEY_EXPECTED_START, -1)

@@ -23,15 +23,15 @@ class AiSettingsActivity : Activity() {
             setPadding(padding, padding, padding, padding)
             setBackgroundColor(Color.rgb(246, 247, 242))
         }
-        root.addView(TextView(this).apply { text = "AIスケジューリング"; textSize = 28f })
+        root.addView(TextView(this).apply { text = "AIスマートフィルター"; textSize = 28f })
         root.addView(TextView(this).apply {
-            text = "AIへ送るのは匿名ID、カテゴリ、工数、優先度、期限、作成日時、再計画回数だけです。タスク名、通知本文、送信者、通知元、URLは送信しません。"
+            text = "除外・最優先ルールに一致しない通知のタイトル・本文・通知元アプリをOpenAIへ送信し、対応が必要か判断します。本文に含まれる人名・会社名・URL等も送信対象です。送信したくない通知は先に除外ルールを設定してください。"
             textSize = 16f
             setPadding(0, 8.dp, 0, 12.dp)
         })
         val consent = CheckBox(this).apply {
-            text = "匿名メタデータをOpenAI APIへ送信することに同意する"
-            isChecked = preferences.consentGranted
+            text = "通知のタイトル・本文・通知元をOpenAIへ送信して判定する"
+            isChecked = preferences.contentConsent
         }
         root.addView(consent)
         val keyInput = EditText(this).apply {
@@ -48,12 +48,12 @@ class AiSettingsActivity : Activity() {
         root.addView(Button(this).apply {
             text = "設定を保存"
             setOnClickListener {
-                preferences.consentGranted = consent.isChecked
+                preferences.contentConsent = consent.isChecked
                 val key = keyInput.text.toString().trim()
                 if (key.isNotEmpty()) preferences.saveApiKey(key)
                 keyInput.text.clear()
                 keyInput.hint = if (preferences.apiKey() == null) "OpenAI APIキー" else "保存済み（変更する場合のみ入力）"
-                Toast.makeText(this@AiSettingsActivity, if (preferences.isReady()) "AI支援を有効にしました" else "AI支援は無効です", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@AiSettingsActivity, if (preferences.filterReady()) "AIフィルターを有効にしました" else "AI未設定の通知は確認待ちになります", Toast.LENGTH_SHORT).show()
             }
         }, matchWidth())
         root.addView(Button(this).apply {
@@ -61,16 +61,17 @@ class AiSettingsActivity : Activity() {
             setOnClickListener {
                 preferences.clearApiKey()
                 preferences.consentGranted = false
+                preferences.contentConsent = false
                 consent.isChecked = false
                 keyInput.hint = "OpenAI APIキー"
                 Toast.makeText(this@AiSettingsActivity, "APIキーを削除しました", Toast.LENGTH_SHORT).show()
             }
         }, matchWidth())
         root.addView(TextView(this).apply {
-            text = "AIが利用できない場合は、期限・優先度・工数に基づく従来の端末内スケジューラへ自動的に戻ります。API利用料は設定したOpenAIアカウントに発生します。"
+            text = "AIが利用できない・判断が曖昧な場合は確認待ちにし、自動登録しません。確認待ちはタスク確認画面から承認・除外・再判定できます。API利用料が発生します。APIのstoreはfalseですが、送信先のデータ保持ポリシーが適用されます。"
             setPadding(0, 12.dp, 0, 0)
         })
-        setContentView(root)
+        setContentView(android.widget.ScrollView(this).apply { addView(root) })
     }
 
     private fun matchWidth() = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)

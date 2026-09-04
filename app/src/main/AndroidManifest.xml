@@ -8,6 +8,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Hisho">
+        <activity android:name=".FilterSettingsActivity" android:exported="false" android:label="通知の登録ルール" />
 
         <activity
             android:name=".MainActivity"

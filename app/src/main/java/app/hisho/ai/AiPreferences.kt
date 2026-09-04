@@ -11,6 +11,12 @@ class AiPreferences(context: Context) {
         get() = preferences.getBoolean(CONSENT, false)
         set(value) { preferences.edit().putBoolean(CONSENT, value).apply() }
 
+    var contentConsent: Boolean
+        get() = preferences.getBoolean("content_filter_consent", false)
+        set(value) { preferences.edit().putBoolean("content_filter_consent", value).apply() }
+
+    fun filterReady() = contentConsent && apiKey() != null
+
     fun saveApiKey(apiKey: String) {
         val encrypted = EncryptedPayloadStore().encrypt(apiKey.trim())
         preferences.edit()

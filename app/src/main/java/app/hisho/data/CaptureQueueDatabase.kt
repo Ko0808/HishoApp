@@ -13,6 +13,7 @@ import java.util.UUID
 
 class CaptureQueueDatabase(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+    private val filterPreferences = app.hisho.intelligence.FilterPreferences(context)
 
     data class QueueStats(
         val pending: Int,
@@ -35,6 +36,7 @@ class CaptureQueueDatabase(context: Context) :
         val category: String,
         val recoveryCount: Int,
         val createdAtEpochMillis: Long,
+        val decisionReason: String = "",
     )
     data class UnscheduledCapture(
         val id: Long,
@@ -198,6 +200,7 @@ class CaptureQueueDatabase(context: Context) :
         scrubExpiredIgnoredPayloads()
         val crypto = EncryptedPayloadStore()
         val metadata = LocalTaskProcessor().process(notification)
+        val decision = app.hisho.intelligence.FilterRules.decide(filterPreferences.rules(), notification.packageName, notification.title, notification.text)
         val title = crypto.encrypt(notification.title)
         val body = crypto.encrypt(notification.text)
         val values = ContentValues().apply {
@@ -212,14 +215,15 @@ class CaptureQueueDatabase(context: Context) :
             put("body_cipher", body.cipherText)
             put("body_nonce", body.nonce)
             put("created_at", System.currentTimeMillis())
-            put("state", if (metadata.isCandidate) "PENDING" else "IGNORED")
+            put("state", if (decision == app.hisho.intelligence.FilterRules.Decision.EXCLUDE) "IGNORED" else "PENDING")
             metadata.deadlineEpochMillis?.let { put("deadline", it) }
             put("deadline_type", metadata.deadlineType.name)
             put("effort", metadata.effort.name)
-            put("priority", metadata.priority.name)
+            put("priority", if (decision == app.hisho.intelligence.FilterRules.Decision.FORCE) "HIGH" else "NORMAL")
             put("category", metadata.category.name)
-            put("is_candidate", if (metadata.isCandidate) 1 else 0)
-            put("candidate_reason", metadata.candidateReason)
+            put("is_candidate", if (decision == app.hisho.intelligence.FilterRules.Decision.EXCLUDE) 0 else 1)
+            put("candidate_reason", if (decision == app.hisho.intelligence.FilterRules.Decision.EXCLUDE)
+                app.hisho.intelligence.FilterRules.explanation(filterPreferences.rules(), notification.packageName, notification.title, notification.text) else "filter_pending")
             put(
                 "action_title",
                 ActionTitleGenerator.generate(notification.title, notification.text, notification.packageName),
@@ -285,11 +289,10 @@ class CaptureQueueDatabase(context: Context) :
         val clauses = mutableListOf<String>()
         val arguments = mutableListOf<String>()
         clauses += "state != 'DELETED'"
-        val riskClause = "(state = 'SYNCED' AND deadline IS NOT NULL AND " +
-            "(deadline < ? OR scheduled_end IS NULL OR scheduled_end > deadline))"
+        val riskClause = "(state = 'SYNCED' AND deadline IS NOT NULL AND deadline < ?)"
         if (attentionOnly || riskOnly) {
             clauses += if (riskOnly) riskClause else
-                "(state IN ('NEEDS_ATTENTION','FAILED','RETRY','PENDING') OR $riskClause)"
+                "(state IN ('NEEDS_ATTENTION','FAILED','RETRY','PENDING','REVIEW') OR $riskClause)"
             arguments += System.currentTimeMillis().toString()
         }
         if (states.isNotEmpty()) {
@@ -444,7 +447,7 @@ class CaptureQueueDatabase(context: Context) :
         failed = count("state = 'FAILED'"),
         ignored = count("state = 'IGNORED'"),
         scheduled = count("calendar_event_id IS NOT NULL"),
-        needsAttention = count("state = 'NEEDS_ATTENTION'"),
+        needsAttention = count("state IN ('NEEDS_ATTENTION','REVIEW')"),
     )
 
     fun pending(limit: Int = 20): List<PendingCapture> {
@@ -454,7 +457,7 @@ class CaptureQueueDatabase(context: Context) :
             arrayOf(
                 "id", "dedup_key", "source_package", "deadline", "effort", "action_title", "priority",
                 "category", "recovery_count", "created_at",
-                "title_cipher", "title_nonce", "body_cipher", "body_nonce",
+                "title_cipher", "title_nonce", "body_cipher", "body_nonce", "candidate_reason",
             ),
             "state IN ('PENDING','RETRY')",
             null,
@@ -466,10 +469,10 @@ class CaptureQueueDatabase(context: Context) :
         ).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    val title = crypto.decrypt(
+                    val title = if (cursor.getBlob(10).isEmpty()) "" else crypto.decrypt(
                             EncryptedPayloadStore.EncryptedValue(cursor.getBlob(10), cursor.getBlob(11)),
                     )
-                    val body = crypto.decrypt(
+                    val body = if (cursor.getBlob(12).isEmpty()) "" else crypto.decrypt(
                             EncryptedPayloadStore.EncryptedValue(cursor.getBlob(12), cursor.getBlob(13)),
                     )
                     add(
@@ -486,6 +489,7 @@ class CaptureQueueDatabase(context: Context) :
                             category = cursor.getString(7),
                             recoveryCount = cursor.getInt(8),
                             createdAtEpochMillis = cursor.getLong(9),
+                            decisionReason = cursor.getString(14),
                         ),
                     )
                 }
@@ -500,7 +504,7 @@ class CaptureQueueDatabase(context: Context) :
             "reschedule_requested", "scheduled_block_count",
         ),
         "state = 'SYNCED' AND google_task_id IS NOT NULL " +
-            "AND (calendar_event_id IS NULL OR reschedule_requested = 1)",
+            "AND reschedule_requested = 1",
         null,
         null,
         null,
@@ -531,6 +535,7 @@ class CaptureQueueDatabase(context: Context) :
         val values = ContentValues().apply {
             put("state", "SYNCED")
             put("google_task_id", googleTaskId)
+            put("reschedule_requested", 0)
             put("title_cipher", ByteArray(0))
             put("title_nonce", ByteArray(0))
             put("body_cipher", ByteArray(0))
@@ -538,6 +543,62 @@ class CaptureQueueDatabase(context: Context) :
             putNull("last_error_code")
         }
         writableDatabase.update("capture_queue", values, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun filterResult(id: Long, state: String, reason: String, title: String? = null, priority: String? = null) {
+        require(state in setOf("PENDING", "REVIEW", "IGNORED"))
+        val values = ContentValues().apply {
+            put("state", state); put("candidate_reason", reason.take(200))
+            put("is_candidate", if (state == "IGNORED") 0 else 1)
+            putNull("last_error_code")
+            title?.takeIf { it.isNotBlank() }?.let { put("action_title", it.take(60)) }
+            priority?.let { put("priority", it) }
+        }
+        writableDatabase.update("capture_queue", values, "id = ? AND google_task_id IS NULL AND state IN ('PENDING','RETRY','REVIEW')", arrayOf(id.toString()))
+    }
+
+    fun approveReview(id: Long) = filterResult(id, "PENDING", "user_approved")
+    fun retryReview(id: Long) = filterResult(id, "PENDING", "filter_pending")
+
+    fun notificationPreview(id: Long): String = readableDatabase.rawQuery(
+        "SELECT title_cipher, title_nonce, body_cipher, body_nonce FROM capture_queue WHERE id = ?", arrayOf(id.toString()),
+    ).use { cursor ->
+        if (!cursor.moveToFirst() || cursor.getBlob(0).isEmpty()) "通知本文は保存されていません"
+        else runCatching {
+            val crypto = EncryptedPayloadStore()
+            crypto.decrypt(EncryptedPayloadStore.EncryptedValue(cursor.getBlob(0), cursor.getBlob(1))) + "\n" +
+                crypto.decrypt(EncryptedPayloadStore.EncryptedValue(cursor.getBlob(2), cursor.getBlob(3)))
+        }.getOrDefault("通知本文を読み出せませんでした").take(4000)
+    }
+
+    fun isPending(id: Long): Boolean = readableDatabase.rawQuery(
+        "SELECT 1 FROM capture_queue WHERE id = ? AND state IN ('PENDING','RETRY')", arrayOf(id.toString()),
+    ).use { it.moveToFirst() }
+
+    fun markRemoteDeleted(id: Long) {
+        // Preserve legacy event tracking until the user explicitly cleans those events up.
+        writableDatabase.update("capture_queue", ContentValues().apply { put("state", "DELETED") }, "id = ?", arrayOf(id.toString()))
+    }
+
+    fun syncTargets(): List<CompletionRequest> = readableDatabase.rawQuery(
+        "SELECT id, google_task_id FROM capture_queue WHERE state IN ('SYNCED','NEEDS_ATTENTION') AND google_task_id IS NOT NULL", null,
+    ).use { cursor -> buildList { while (cursor.moveToNext()) add(CompletionRequest(cursor.getLong(0), cursor.getString(1))) } }
+
+    fun legacyEventIds(id: Long): List<String> {
+        val primary = readableDatabase.rawQuery("SELECT calendar_event_id FROM capture_queue WHERE id = ?", arrayOf(id.toString()))
+            .use { if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null }
+        return (calendarBlocks(id).map { it.calendarEventId } + listOfNotNull(primary)).distinct()
+    }
+
+    fun legacyTargets(): List<Pair<Long, String>> = readableDatabase.rawQuery(
+        "SELECT id, action_title FROM capture_queue WHERE calendar_event_id IS NOT NULL OR EXISTS (SELECT 1 FROM calendar_blocks b WHERE b.capture_queue_id = capture_queue.id)", null,
+    ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getLong(0) to cursor.getString(1)) } }
+
+    fun detachLegacyEvents(id: Long) {
+        clearCalendarBlocks(id)
+        writableDatabase.update("capture_queue", ContentValues().apply {
+            putNull("calendar_event_id"); putNull("scheduled_start"); putNull("scheduled_end")
+        }, "id = ?", arrayOf(id.toString()))
     }
 
     fun markScheduled(

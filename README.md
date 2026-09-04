@@ -1,338 +1,103 @@
 # Hisho / 秘書
 
-Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ同期するローカル優先のタスクスケジューラーです。
-
-A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
-
-**Current version / 現在のバージョン:** `0.30.0` (`versionCode 32`)
-
----
+**Version: 0.31.0 (33)** — Personal use only / 個人利用専用
 
 ## 日本語
 
-### 概要
+通知をそのまま予定に変換する方式を停止し、必要性を判定してGoogle Tasksへ登録する方式に変更しました。一般公開、ストア公開準備、公開用ポリシー作成は対象外です。認証の維持、データ保護、個人端末の更新時のデータ保持は引き続き対象です。
 
-HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行います。
+### 登録の順序
 
-1. 同一通知の更新を重複除外
-2. 通知内容をAndroid Keystoreの鍵でAES-GCM暗号化して一時保存
-3. タスク候補、期限、工数、優先度、カテゴリをローカルで推定
-4. 通知元に応じた短い行動タイトルを生成
-5. Google Tasksの専用リスト`Auto Captured Tasks`へ登録
-6. Google Calendarの予定を避けて、開始・終了時刻を持つ作業枠を作成
-7. 任意で、未完了タスクを次の空き時間へ再配置
+1. **除外**：指定ワード・通知元アプリに一致した通知は登録せず、AIにも送信しません。
+2. **最優先登録**：除外されず、最優先ルールに一致した通知をAIなしで登録します。優先度HIGHと「【最優先】」のタイトルで識別します（Google Tasks APIには優先度フィールドがありません）。
+3. **AI判定**：未一致の通知のタイトル・本文・通知元をOpenAI Responses APIへ送信し、必要／不要／確認待ちを判定します。
+4. **確認待ち**：AI未設定・通信失敗・拒否・不完全な応答・曖昧な通知は自動登録しません。確認画面で元の通知を読み、名前を修正して承認・除外・再判定できます。
 
-現在、通知本文を外部AIへ送信していません。
+除外と最優先が競合する場合は除外が優先です。ワードは部分一致で、英字大小・全角半角を正規化します。通知元はGmail、Slack、Discord、LINEを画面から選択します。取得OFFのアプリは処理対象外です。ルールは未同期通知の処理にも適用しますが、登録済みタスクを自動削除しません。手動追加は本人の明示入力としてAI判定を省略します。
 
-### 実装済みの機能
+AIには通知を命令でなく未信頼のデータとして扱わせ、構造化された応答のみ受け入れます。ただし誤判定を完全には防げず、実際の通知での精度評価が必要です。
 
-- タイトルだけのクイック追加、Enter／完了キーで保存、任意項目の折りたたみ、入力途中の画面回転への対応
-- Androidのテキスト共有から下書きを作成（自動保存しない）
-- 確認付きの端末音声入力と、非対応端末でのキーボード入力への案内
-- 通知アクセス → Google接続 → 稼働時間 → 実行通知 → 自動再配置の初期設定ガイド
-- 自動再配置の明示選択、Googleと任意AIのデータ送信範囲の説明、Google再接続の導線
-- 新規Calendar枠の配置理由を作成時に記録し、詳細画面に表示（旧予定・手動移動は理由不明を明示）
-- 通知復元でスヌーズを維持し、通知済み・終了済み・再配置待ちの枠の不要な通知を抑制
-- ホームの「次にやること」に進行中の枠と分割タスクの次の枠を反映
-- 対応が必要なタスクを初期表示する確認Inbox（期限注意・未同期・再配置の確認）
-- 表示対象を直接選ぶフィルターと、編集をまとめた「詳細・操作」メニュー
+### Google TasksとCalendar
 
-- `NotificationListenerService`による通知取得とアプリ別ON／OFF
-- SHA-256と時間窓による重複排除
-- 通知本文とGoogleアクセストークンの暗号化
-- SQLiteの永続キューとWorkManagerによる再試行・15分間隔の同期
-- Google Play services `AuthorizationClient`によるOAuth認証
-- Google Tasks／Calendar APIとの冪等な同期
-- 日本語の相対日付、曜日、日付・時刻表現の解析
-- XS／S／M／L／XLの工数、優先度、カテゴリ推定
-- Gmail、Slack、Discord、LINEに応じた短いタスク名の生成
-- Hisho内からタイトル、期限、工数、優先度を指定する手動タスク追加
-- タイトル、期限、優先度、工数の手動編集
-- 同期済みタスクの更新とCalendar再配置
-- Lを60分×2、XLを60分×4に分割
-- 分割した各Calendar枠のイベントID、順番、時刻、再計画世代を永続追跡
-- Calendar側で移動した追跡対象枠の時刻をHishoへ反映し、削除時は要確認として停止
-- 次のタスク、自動運転状態、対応が必要な問題だけに絞ったホーム画面
-- 締切危険・同期失敗・要確認・同期待ちからタスク確認へ進む導線
-- Google Calendarを直接開く操作と、運用項目を集約した設定画面
-- Calendar枠の開始5分前と開始時に届く実行タイミング通知
-- 実行通知からの完了、15分後への延期、空き時間への再配置
-- アプリ更新・再起動後の既存Calendar枠に対する通知予約の復元
-- タスク状態の絞り込みとタスク名・通知元の検索
-- 確認付きのタスク削除とGoogle Tasks・追跡Calendar枠の連動削除
-- 通知元、状態、期限、配置、再計画回数、全Calendar枠を確認できるタスク詳細
-- 複数選択したタスクの確認付き一括完了・一括削除
-- 稼働時間、余白、1日の上限、土日、昼休みの設定
-- 月〜日それぞれの稼働ON／OFFと開始・終了時刻
-- 分単位で変更できる休憩開始・終了時刻
-- 未完了タスクの自動再配置、再計画上限、要確認状態
-- 要確認タスクの再開とGoogle Tasksへの完了同期
-- 明示同意と暗号化APIキーによる任意のAIスケジューリング
-- タイトル・本文・送信者・通知元を除外した匿名メタデータMapper
-- AIによる同期前の優先順位・期限リスク評価と、障害時の端末内スケジューラへの自動フォールバック
-- Calendar Free/Busyから生成した匿名の日別空き分数による過密日判断
-- AIが提案する25／30／45／60分単位での長時間タスク分割
+- 新規Calendar予定・作業ブロックの作成、旧時間枠通知、自動再配置は停止しました。
+- Google Tasksの作成・編集・完了・削除を同期します。Google側の完了・削除も次回同期で反映します。
+- Google Tasks APIは期限の日付だけを保存し、時刻部分は破棄します。日本時間の日付がずれない形で送信します。時刻指定のタスク配置は実装していません。[Google公式仕様](https://developers.google.com/workspace/tasks/reference/rest/v1/tasks)
+- 以前作成したCalendar予定は自動削除しません。「設定 → 整理する予定を選ぶ」で対象を選択し、再確認後に予定だけを削除できます。Google Tasksは残ります。
+- 端末がIDを追跡していない旧予定は整理対象にできません。Calendar上で個別に確認してください。
+- 個々のタスクを削除する操作は、そのタスクと追跡している旧Calendar予定の両方を削除します。
 
-### 標準のスケジュール設定
+### 設定手順
 
-- 稼働時間：09:00〜18:00
-- 予定間の余白：10分
-- 1日の予定上限：6時間
-- 土日：配置しない
-- 昼休み：12:00〜13:00を避ける
-- 長時間タスク：最大60分の枠に分割
-- 未完了タスクの自動再配置：OFF
-- 再計画上限：3回（1／3／5回から選択）
+1. 「設定 → 除外・最優先ルールを設定」でルールを保存。
+2. 「AIスマートフィルターを設定」で送信内容を確認し、本文送信を有効にしてAPIキーを保存。以前の匿名AI同意は本文送信の同意として流用しません。
+3. 通知へのアクセスと取得対象アプリを設定。
+4. Googleアカウントを接続。
+5. 確認待ちは「タスクを確認する → 詳細・操作」から承認・除外・再判定。
 
-設定変更は新規または再配置されるタスクから適用され、既存予定を一括変更しません。
+API利用料が発生します。タイトル・本文内の人名・会社名・URL等も送信対象です。除外ルールを先に設定してください。APIキーと保存通知本文はAndroid Keystoreで暗号化します。Google同期成功後は元の通知本文を消去します。APIリクエストはstore=falseですが、送信先のデータ保持ポリシーは適用されます。本文・キーをログ出力しません。
 
-### 必要環境とGoogle Cloud
+### その他の機能
 
-- Android 8.0（API 26）以上
-- Google Play services
-- 通知へのアクセス権限
-- Google Tasks APIとGoogle Calendar APIを有効にしたGoogle Cloudプロジェクト
-- パッケージ名`app.hisho`と署名証明書に対応するAndroid OAuthクライアント
+- 通知更新の重複排除、SQLiteの永続キュー、WorkManagerの定期同期と再試行
+- タイトルだけの手動追加、Enter保存、任意項目の展開
+- Androidのテキスト共有・確認付き音声入力（端末の認識サービスへの外部送信があり得ます）
+- タイトル・期限・工数・優先度の編集、検索・状態フィルター・一括操作
+- 判定理由と除外履歴の表示
 
-要求するOAuthスコープ：
+### 開発環境
 
-- `https://www.googleapis.com/auth/tasks`
-- `https://www.googleapis.com/auth/calendar.events`
-- `https://www.googleapis.com/auth/calendar.events.freebusy`
-
-OAuthクライアントIDは`app/build.gradle.kts`の`GOOGLE_ANDROID_CLIENT_ID`で設定します。クライアントIDは公開識別子ですが、本番の秘密情報や署名鍵はコミットしないでください。
-
-### ビルドとインストール
-
-Java 17とAndroid SDKを設定して実行します。
+Android 8.0以上、Google Play services、Java 17、Android SDKが必要です。
+Google CloudではTasks APIを有効化します。旧Calendar予定の整理にはCalendar APIも必要です。
+既存OAuth設定はtasks、calendar.events、calendar.events.freebusyの権限を要求します。Calendar新規作成とFree/Busy取得は現在行いません。
+Android OAuthクライアントはパッケージ名 app.hisho と端末に配布するAPKの署名証明書に対応させます。クライアントIDは app/build.gradle.kts に設定。APIキーや署名鍵をGitへコミットしないでください。
 
 ```powershell
-.\gradlew.bat testDebugUnitTest assembleDebug
+.\gradlew.bat testDebugUnitTest assembleDebug lintDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-APK出力先：`app/build/outputs/apk/debug/app-debug.apk`
+### 残る検証と改善
 
-### 初回セットアップ
+- 実通知でのAI精度、失敗時に確認待ちになること、誤登録率の測定
+- Google側の完了反映、旧予定の選択式整理、オフライン復帰の実機検証
+- アカウント切断・OAuth権限取り消し・全データ削除UI
+- 大量通知、長期利用、DB移行、バッテリー検証
 
-1. Hishoを起動し、「設定」から通知へのアクセスを許可します。
-2. 設定画面で取得対象のアプリを選択します。
-3. 設定画面からGoogleアカウントを接続し、TasksとCalendarへのアクセスを許可します。
-4. Android 13以降では、設定画面から実行タイミング通知を許可します。
-5. 通知受信後、ホームの「対応が必要」で同期待ち件数を確認します。
-6. 必要なら「タスクを確認する」から編集します。
-7. 「今すぐ同期」を押すか、バックグラウンド同期を待ちます。
-
-AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を確認し、OpenAI APIキーを保存して明示的に同意した場合のみ有効になります。APIキーはAndroid Keystoreの鍵で暗号化されます。
-
-### 推奨する実機検証
-
-1. 対応アプリから通知を発生させ、同一通知の更新が重複しないことを確認します。
-2. 「タスクを手動で追加」からタイトル、期限、工数、優先度を指定し、TasksとCalendarへ同期されることを確認します。
-3. 未同期タスクのタイトル、期限、優先度、工数を編集して同期します。
-4. Calendar枠が稼働時間内にあり、既存予定・土日・昼休みを避けることを確認します。
-5. Sは25分、Mは60分、Lは2枠、XLは4枠になることを確認します。
-6. 同期済みタスクを編集し、以前の枠が整理されて再配置されることを確認します。
-7. 自動再配置を有効にし、未完了タスクが予定終了後に移動することを確認します。
-8. 再計画上限で「要確認」になり、再開または完了にできることを確認します。
-9. AI支援を有効にし、複数の同期待ちタスクでAI適用・過密状態が表示されること、長時間タスクが提案された長さに分割されることを確認します。
-10. AI通信を失敗させても、通常の優先順と最大60分の分割で同期が継続することを確認します。
-11. Calendar枠の5分前と開始時に通知され、通知から完了・15分後・再配置を操作できることを確認します。
-
-### プライバシーと安全性
-
-- 通知本文は端末内で暗号化し、Logcatへ出力しません。
-- 同期成功後、保存していた通知本文を端末内キューから消去します。
-- 判定とタイトル生成は端末内ルールで行い、外部AIへ本文を送りません。
-- 自動再配置は初期状態でOFFです。
-- 同期済みタスクの編集は手動または定期同期時にGoogleへ反映されます。
-
-### 既知の制限
-
-- 実行通知はWorkManagerを利用するため時刻厳守ではなく、省電力などで遅れる場合があります。終了済みの枠は通知しません。
-- 「15分後」は通知だけの延期です。延期先が作業枠の終了後なら再通知しません。Calendarを変える場合は「再配置」を使います。
-- 音声入力は端末の認識サービスを使います。オフライン優先を要求しますが、サービスによって外部送信される可能性があるため、利用前に確認します（[Android仕様](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_PREFER_OFFLINE)）。
-- 自動テストに加え、通知到着・スヌーズ・Google連携操作・音声認識・省電力時の実機検証が必要です。チェック項目は[検証手順](docs/ux-validation.md)を参照してください。
-- 個人端末向け検証版で、本番署名とGoogle Play向けOAuth審査は未対応です。
-- OAuth同意画面がテスト公開の場合、再認証が必要になることがあります。
-- 旧バージョンの予定へ現在の設定は遡及適用されません。
-- 旧DBの項目には短縮タイトルが保存されていない場合があります。
-- 0.16.0より前に作成された未追跡予定は、Calendar側の移動・削除を自動検出できません。
-- 通知形式の違いにより、タイトル・期限・工数の推定が誤る場合があります。
-- 祝日と希望時間帯は未対応です。
-- アカウント切断、OAuth権限取り消し、全データ削除UIは未実装です。
-- タイトルや本文をAIへ送る意味的な要約・推定・タスク分解は、プライバシー設計確定まで未実装です。
-
-### 今後の計画
-
-1. 祝日と希望時間帯
-2. 共有・音声・初期設定・実行通知の継続的な実機検証
-3. アカウント切断、OAuth権限取り消し、データ削除
-4. DB移行、API、オフライン、大量通知、バッテリー試験
-5. 本番署名、プライバシーポリシー、Google Play公開対応
-6. 同意を前提にした本文AI処理（現在は匿名スケジューリング・過密判断・分割提案まで実装済み）
-
----
+旧スケジューラ関連の一部コードとテストは履歴互換のため残っていますが、新規配置には使いません。[検証項目](docs/smart-filter-validation.md)
 
 ## English
 
-### Overview
+Hisho is a personal-use Android notification-to-task app. It now filters notifications before creating Google Tasks instead of creating Calendar time-block events. Public distribution and store-release preparation are out of scope; authentication, data protection, and safe personal updates remain in scope.
 
-Hisho captures Gmail, Slack, Discord, and LINE notifications, then:
+### Decision order
 
-1. Deduplicates repeated notification updates.
-2. Temporarily encrypts content with AES-GCM using an Android Keystore-backed key.
-3. Locally infers task candidacy, deadline, effort, priority, and category.
-4. Generates a concise action title tailored to the source app.
-5. Creates an item in the dedicated Google Tasks list, `Auto Captured Tasks`.
-6. Finds free time and creates Google Calendar events with explicit start and end times.
-7. Optionally reschedules unfinished tasks into later free time.
+1. Exclusion rules (keyword or source app): no task and no AI request.
+2. Force rules: register without AI, with local HIGH priority and a visible priority title prefix. Exclusion always wins.
+3. Otherwise send notification title, body, and source to OpenAI to classify as task, ignore, or review.
+4. Missing configuration, network errors, refusals, malformed/incomplete output, and uncertainty are held for review, never automatically registered.
 
-Notification content is not currently sent to an external AI service.
+Keywords use normalized case/width-insensitive substring matching. Source apps are selectable by name. Rules also apply to pending notifications, not retroactively to already-synced tasks. Manual input bypasses classification. Review items can be inspected, renamed, approved, ignored, or reclassified.
 
-### Implemented features
+The classifier treats notification content as untrusted data and accepts structured output only. This does not guarantee perfect accuracy or immunity to prompt injection; real notification evaluation remains necessary.
 
-- Title-only quick capture, Enter/Done to save, collapsed optional fields, and draft preservation across rotation
-- Android text sharing into an editable draft, without automatic saving
-- Consent-first system voice input, with keyboard fallback when unavailable
-- Guided setup: notification access → Google → work hours → reminders → recovery choice
-- Explicit recovery choice, Google/optional-AI data explanations, and Google reconnection
-- Per-block placement explanations recorded at creation; unknown legacy or externally moved reasons are stated explicitly
-- Reminder restoration preserves snoozes and suppresses already-delivered, expired, or replan-pending reminders
-- Home shows the current or next tracked block, including split tasks
-- An attention-first review inbox for deadline risk, pending sync, and recovery issues
-- Direct filter selection and a compact details/actions menu instead of per-card editing controls
+### Tasks-only behavior
 
-- Notification capture with `NotificationListenerService` and per-app toggles
-- SHA-256 and time-window deduplication
-- Encrypted notification payloads and Google access tokens
-- Durable SQLite queue with WorkManager retries and 15-minute periodic sync
-- OAuth through Google Play services `AuthorizationClient`
-- Idempotent Google Tasks and Calendar API synchronization
-- Japanese relative-date, weekday, date, and time parsing
-- XS/S/M/L/XL effort, priority, and category inference
-- Source-aware titles for Gmail, Slack, Discord, and LINE
-- Manual task creation with a title, deadline, effort, and priority inside Hisho
-- Manual title, deadline, priority, and effort editing
-- Synced-task updates and Calendar rescheduling
-- Two 60-minute blocks for L and four blocks for XL tasks
-- Persistent event ID, order, time, and generation tracking for every split Calendar block
-- Calendar-side time changes are imported for tracked blocks; deleted blocks stop in Needs attention
-- A calm home screen focused on the next task, automation health, and actionable problems
-- Direct task-review paths for deadline risk, sync failures, attention items, and pending work
-- Direct Google Calendar access with operational controls consolidated in Settings
-- Execution reminders five minutes before and at the start of each Calendar block
-- Complete, snooze for 15 minutes, and reschedule actions directly from reminders
-- Reminder restoration for existing future Calendar blocks after an update or restart
-- Task-state filters and title/source search
-- Confirmed task deletion synchronized with Google Tasks and all tracked Calendar blocks
-- Task details covering source, state, deadline, schedule, recovery count, and every Calendar block
-- Confirmed bulk completion and deletion for selected tasks
-- Working hours, buffers, daily capacity, weekend, and lunch settings
-- Per-day enablement and start/end times from Monday through Sunday
-- Custom break start and end times with minute precision
-- Optional unfinished-task recovery with configurable limits
-- Restart and Google Tasks completion actions for items needing attention
-- Optional AI scheduling with explicit consent and an encrypted API key
-- An anonymous metadata mapper that excludes titles, bodies, senders, and notification sources
-- AI ordering and deadline-risk prioritization before sync, with automatic deterministic fallback
-- Overloaded-day detection using anonymous daily free-minute totals derived from Calendar Free/Busy
-- AI-selected 25/30/45/60-minute maximum blocks for long tasks
+- No new Calendar events, execution-block reminders, or automatic block recovery.
+- Create, edit, complete, and delete Google Tasks; observe completion/deletion from Google on subsequent syncs.
+- The Tasks API stores dates, not due-time components. Local dates are preserved when formatting requests; timed task placement is not implemented. [Google reference](https://developers.google.com/workspace/tasks/reference/rest/v1/tasks)
+- Legacy Calendar cleanup is opt-in: choose tracked items and confirm. It deletes events but retains Tasks. Untracked events require manual inspection.
+- Deleting a task through the normal deletion action also deletes its tracked legacy events.
 
-### Default scheduling settings
+### Setup and privacy
 
-- Working hours: 09:00–18:00
-- Event buffer: 10 minutes
-- Daily capacity: 6 hours
-- Weekends: disabled
-- Lunch break: avoid 12:00–13:00
-- Long tasks: split into blocks of at most 60 minutes
-- Automatic unfinished-task recovery: disabled
-- Recovery limit: 3 attempts, configurable to 1, 3, or 5
+Configure exclusion/force rules first, then enable notification-content AI consent and save an API key, grant notification access, and connect Google. Previous anonymous-metadata consent does not authorize the new content filter.
 
-Changes apply to new or explicitly rescheduled tasks and do not bulk-edit existing events.
+Names, companies, and URLs in notification content may be transmitted. API usage is billed. Stored notification payloads and API keys are encrypted with Android Keystore; raw payloads are cleared after successful Google sync. Requests use store=false; provider retention policies still apply. Sensitive payloads and keys are not logged.
 
-### Requirements and Google Cloud
+The API uses the existing gpt-5.4-mini model and Responses structured outputs. [OpenAI documentation](https://developers.openai.com/api/docs/guides/structured-outputs)
 
-- Android 8.0 (API 26) or later
-- Google Play services and notification access
-- A Google Cloud project with the Google Tasks and Google Calendar APIs enabled
-- An Android OAuth client matching package `app.hisho` and the signing certificate
+### Build and remaining work
 
-Required OAuth scopes:
+Use Java 17 and Android SDK; run the Gradle/test and adb commands above. Requires Android 8+, Google Play services, Tasks API, and an Android OAuth client matching the package/signing certificate. Calendar API is needed only for legacy cleanup. Existing OAuth scopes still include Tasks, Calendar events, and Free/Busy, but no new events or Free/Busy reads occur.
 
-- `https://www.googleapis.com/auth/tasks`
-- `https://www.googleapis.com/auth/calendar.events`
-- `https://www.googleapis.com/auth/calendar.events.freebusy`
-
-Set the public OAuth client ID through `GOOGLE_ANDROID_CLIENT_ID` in `app/build.gradle.kts`. Never commit production secrets or signing keys.
-
-### Build and install
-
-Configure Java 17 and the Android SDK, then run:
-
-```powershell
-.\gradlew.bat testDebugUnitTest assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-APK output: `app/build/outputs/apk/debug/app-debug.apk`
-
-### First-time setup
-
-1. Open Hisho and grant notification access.
-2. Select the apps to capture.
-3. Connect a Google account and grant Tasks and Calendar access.
-4. On Android 13 or later, allow execution reminders from Settings.
-5. Generate a notification and check pending work under **Needs attention**.
-6. Optionally review and edit the inferred task.
-7. Select **Sync now** or wait for background synchronization.
-
-AI assistance is off by default. It is enabled only after reviewing the transmitted fields, saving an OpenAI API key, and explicitly consenting in **AI assistance settings**. The API key is encrypted with an Android Keystore-backed key.
-
-### Recommended device validation
-
-1. Generate supported-app notifications and verify duplicate updates are ignored.
-2. Create a task with a title, deadline, effort, and priority using **Add task manually**, then verify Tasks and Calendar synchronization.
-3. Edit a pending task's title, deadline, priority, and effort, then sync it.
-4. Verify Calendar blocks stay within working hours and avoid events, weekends, and lunch.
-5. Verify S uses 25 minutes, M uses 60 minutes, L creates two blocks, and XL creates four.
-6. Edit a synced task and verify its prior blocks are replaced by a new schedule.
-7. Enable recovery and verify an unfinished task moves after its scheduled end.
-8. Verify a task exceeding its limit becomes **Needs attention** and can be restarted or completed.
-9. Enable AI assistance and verify its applied/overloaded status and suggested block lengths with multiple pending tasks.
-10. Force an AI request failure and confirm synchronization continues with deterministic ordering and 60-minute blocks.
-11. Verify reminders arrive five minutes before and at block start, then test Complete, 15 minutes later, and Reschedule.
-
-### Privacy and safety
-
-- Notification content is encrypted at rest and never written to Logcat.
-- Stored payloads are scrubbed after successful synchronization.
-- Classification and title generation run locally without external AI.
-- Automatic recovery is disabled by default.
-- Synced-task edits reach Google only during a manual or periodic sync.
-
-### Known limitations
-
-- WorkManager reminders are not exact alarms and may be delayed by power management. Expired blocks are not notified.
-- Snooze postpones only the reminder, not the Calendar block. A snooze beyond the block end is suppressed; use replan to change the schedule.
-- Voice input uses the device recognition service. Offline preference is requested but is not guaranteed; a consent dialog warns about possible external processing ([Android reference](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_PREFER_OFFLINE)).
-- Device validation is still required for notification arrival/actions, Google integration, speech recognition, and power-saving behavior; see the [validation checklist](docs/ux-validation.md).
-- This is a personal-device validation build; production signing and Google Play OAuth review are incomplete.
-- Testing-mode OAuth may require reauthorization.
-- Current preferences are not applied retroactively to old events.
-- Migrated entries may not have a stored concise title.
-- Events created before 0.16.0 are not tracked and cannot be reconciled automatically.
-- Notification-format differences can cause incorrect title, deadline, or effort inference.
-- Public holidays and preferred time windows are unsupported.
-- Account disconnect, OAuth revocation, and full data-deletion controls are not implemented.
-- Content-based AI summarization, estimation, and decomposition remain disabled until their privacy design is finalized.
-
-### Roadmap
-
-1. Add public holidays and preferred time windows.
-2. Continue device validation of sharing, voice, onboarding, and reminders.
-3. Add account disconnect, OAuth revocation, and data-deletion controls.
-4. Expand migration, API, offline, load, and battery testing.
-5. Add production signing, privacy documentation, and Google Play release readiness.
-6. Optionally add consent-based content processing (anonymous scheduling, load detection, and block suggestions are implemented).
+Remaining work includes AI quality evaluation, end-to-end completion/cleanup and offline testing, disconnect/revocation/data-deletion controls, and long-term load/battery testing. Legacy scheduler code/tests remain but are not used for new placement. See the [validation checklist](docs/smart-filter-validation.md).
