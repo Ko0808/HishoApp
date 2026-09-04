@@ -29,7 +29,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
-class ManualTaskActivity : Activity() {
+class ManualTaskActivity : app.hisho.ui.GlassActivity() {
     private lateinit var titleInput: EditText
     private lateinit var deadlineButton: Button
     private var deadlineEpochMillis: Long? = null

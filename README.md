@@ -1,6 +1,10 @@
 # Hisho / 秘書
 
-**Version: 0.31.0 (33)** — Personal use only / 個人利用専用
+**Version: 0.32.0 (34)** — Personal use only / 個人利用専用
+
+0.32.0はページ構造と処理を維持したUI刷新です。Liquid Glassを参考に、淡い背景・半透明カード・角丸の操作面・押下アニメーション・入力フォーカス・安全領域対応を共通化しました。iOSの実装やライブぼかしではなく、Androidの軽量な描画を利用しています。
+
+Version 0.32.0 refreshes presentation without changing the page structure or task-processing logic: glass-inspired translucent surfaces, soft gradients, press feedback, clear input focus, and system/keyboard insets. It uses lightweight native Android rendering, not Apple's implementation or live blur.
 
 ## 日本語
 

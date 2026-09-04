@@ -36,7 +36,7 @@ import app.hisho.sync.CaptureSyncWorker
 import app.hisho.sync.TaskRecoveryWorker
 import java.util.concurrent.TimeUnit
 
-class SettingsActivity : Activity() {
+class SettingsActivity : app.hisho.ui.GlassActivity() {
     private lateinit var authorization: GoogleTasksAuthorization
 
     override fun onCreate(savedInstanceState: Bundle?) {

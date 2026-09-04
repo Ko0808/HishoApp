@@ -13,7 +13,7 @@ import android.widget.TextView
 import android.widget.Toast
 import app.hisho.ai.AiPreferences
 
-class AiSettingsActivity : Activity() {
+class AiSettingsActivity : app.hisho.ui.GlassActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val preferences = AiPreferences(this)

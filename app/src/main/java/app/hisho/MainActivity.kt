@@ -37,7 +37,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
-class MainActivity : Activity() {
+class MainActivity : app.hisho.ui.GlassActivity() {
     private lateinit var automationStatus: TextView
     private lateinit var nextTask: TextView
     private lateinit var alerts: LinearLayout
@@ -128,7 +128,7 @@ class MainActivity : Activity() {
         val now = System.currentTimeMillis()
         val database = CaptureQueueDatabase(this)
         val tasks = database.recentMetadata(5, states = setOf("SYNCED"))
-        nextTask.text = if (tasks.isEmpty()) "同期済みの未完了タスクはありません" else tasks.joinToString("\n") { it.actionTitle }
+        nextTask.text = if (tasks.isEmpty()) "未完了のタスクはありません" else tasks.joinToString("\n") { it.actionTitle }
     }
 
     private fun renderSetup(notificationReady: Boolean, reminderReady: Boolean, googleReady: Boolean) {

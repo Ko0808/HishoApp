@@ -7,7 +7,7 @@ import android.widget.*
 import app.hisho.capture.CapturePreferences
 import app.hisho.intelligence.FilterPreferences
 
-class FilterSettingsActivity : Activity() {
+class FilterSettingsActivity : app.hisho.ui.GlassActivity() {
     private var inputs: List<Pair<String, EditText>> = emptyList()
     private val sources = mutableMapOf<String, Int>()
     override fun onCreate(savedInstanceState: Bundle?) {

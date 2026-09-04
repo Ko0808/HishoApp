@@ -24,7 +24,7 @@ import androidx.work.WorkManager
 import app.hisho.data.CaptureQueueDatabase
 import app.hisho.sync.CaptureSyncWorker
 
-class MetadataActivity : Activity() {
+class MetadataActivity : app.hisho.ui.GlassActivity() {
     private lateinit var root: LinearLayout
     private val database by lazy { CaptureQueueDatabase(this) }
     private var selectedFilter = TaskFilter.INBOX

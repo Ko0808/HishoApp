@@ -12,7 +12,7 @@ import android.widget.TextView
 import app.hisho.scheduling.SchedulingPreferences
 import java.time.DayOfWeek
 
-class WeeklyScheduleActivity : Activity() {
+class WeeklyScheduleActivity : app.hisho.ui.GlassActivity() {
     private lateinit var root: LinearLayout
     private val settings by lazy { SchedulingPreferences(this) }
 

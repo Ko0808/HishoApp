@@ -1,10 +1,17 @@
 <resources>
     <style name="Theme.Hisho" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#355F55</item>
+        <item name="android:colorAccent">#2353A9</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:alertDialogTheme">@style/Theme.Hisho.Dialog</item>
         <item name="android:navigationBarColor">#F6F7F2</item>
         <item name="android:statusBarColor">#F6F7F2</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+    <style name="Theme.Hisho.Dialog" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">#2353A9</item>
+        <item name="android:windowBackground">@drawable/glass_dialog</item>
+        <item name="android:backgroundDimAmount">0.25</item>
+        <item name="android:windowElevation">16dp</item>
+    </style>
 </resources>
-
