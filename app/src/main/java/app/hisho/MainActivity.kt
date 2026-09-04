@@ -74,6 +74,7 @@ class MainActivity : Activity() {
         root.addView(section("次にやること"))
         nextTask = TextView(this).apply {
             textSize = 20f; setTextColor(INK); setPadding(16.dp, 16.dp, 16.dp, 16.dp)
+            maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END
             setBackgroundColor(Color.WHITE)
         }
         root.addView(nextTask, matchWidth(bottom = 8.dp))
@@ -104,9 +105,9 @@ class MainActivity : Activity() {
 
     private fun render() {
         val notificationReady = NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
-        val reminderReady = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(
-            this, Manifest.permission.POST_NOTIFICATIONS,
-        ) == PackageManager.PERMISSION_GRANTED
+        val reminderReady = NotificationManagerCompat.from(this).areNotificationsEnabled() &&
+            (getSystemService(android.app.NotificationManager::class.java).getNotificationChannel("hisho_execution_reminders")?.importance
+                != android.app.NotificationManager.IMPORTANCE_NONE)
         val googleReady = EncryptedAuthStore(this).isConnected()
         val stats = CaptureQueueDatabase(this).stats()
         val syncSnapshot = SyncStatusStore(this).snapshot()
@@ -127,30 +128,32 @@ class MainActivity : Activity() {
 
     private fun renderNextTask() {
         val now = System.currentTimeMillis()
-        val next = CaptureQueueDatabase(this).dashboardTasks()
-            .filter { it.state == "SYNCED" && (it.scheduledStartEpochMillis ?: Long.MIN_VALUE) >= now }
-            .minByOrNull { it.scheduledStartEpochMillis ?: Long.MAX_VALUE }
-        nextTask.text = if (next == null) "次の予定はありません\nCalendarの空き時間を確認しています"
-        else "${formatDateTime(next.scheduledStartEpochMillis)}\n${next.actionTitle}" +
+        val database = CaptureQueueDatabase(this)
+        val block = database.upcomingCalendarBlocks(now, 1).firstOrNull()
+        val next = block?.let { database.taskDetail(it.captureId) }
+        nextTask.text = if (next == null) "現在、配置済みの予定はありません\n未同期のタスクは下の「対応が必要」で確認できます"
+        else "${if (block.startEpochMillis <= now) "今の作業枠  •  " else ""}${formatDateTime(block.startEpochMillis)}\n${next.actionTitle}" +
             if (next.recoveryCount > 0) "\n再配置 ${next.recoveryCount}回" else ""
     }
 
     private fun renderSetup(notificationReady: Boolean, reminderReady: Boolean, googleReady: Boolean) {
         setup.removeAllViews()
-        if (notificationReady && reminderReady && googleReady) return
+        val progress = getSharedPreferences("onboarding", MODE_PRIVATE)
+        if (notificationReady && reminderReady && googleReady && progress.getBoolean("hours_confirmed", false) && progress.getBoolean("recovery_confirmed", false)) return
         setup.addView(section("セットアップ"))
         setup.addView(TextView(this).apply {
             text = when {
                 !notificationReady && !googleReady -> "通知アクセスとGoogle接続を完了してください"
                 !notificationReady -> "通知を自動取得するための許可が必要です"
                 !reminderReady -> "実行時間を知らせる通知の許可が必要です"
-                else -> "TasksとCalendarへ同期するためGoogle接続が必要です"
+                !googleReady -> "TasksとCalendarへ同期するためGoogle接続が必要です"
+                else -> "稼働時間と自動再配置の設定を確認しましょう"
             }
             textSize = 16f; setTextColor(DANGER)
         })
         setup.addView(Button(this).apply {
             text = "セットアップを続ける"
-            setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
+            setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java).putExtra("onboarding", true)) }
         }, matchWidth(bottom = 12.dp))
     }
 

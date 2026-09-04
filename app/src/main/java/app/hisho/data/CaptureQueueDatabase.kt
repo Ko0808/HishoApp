@@ -611,13 +611,17 @@ class CaptureQueueDatabase(context: Context) :
         }
     }
 
+    fun isRescheduleRequested(id: Long): Boolean = readableDatabase.rawQuery(
+        "SELECT reschedule_requested FROM capture_queue WHERE id = ?", arrayOf(id.toString()),
+    ).use { it.moveToFirst() && it.getInt(0) != 0 }
+
     fun upcomingCalendarBlocks(afterEpochMillis: Long, limit: Int = 100): List<UpcomingCalendarBlock> =
         readableDatabase.rawQuery(
             """
             SELECT b.capture_queue_id, b.block_index, b.start_at
             FROM calendar_blocks b
             JOIN capture_queue q ON q.id = b.capture_queue_id
-            WHERE q.state = 'SYNCED' AND b.start_at >= ?
+            WHERE q.state = 'SYNCED' AND q.reschedule_requested = 0 AND b.end_at > ?
             ORDER BY b.start_at ASC
             LIMIT ?
             """.trimIndent(),

@@ -29,12 +29,20 @@ class ExecutionReminderWorker(context: Context, params: WorkerParameters) : Work
         val currentBlock = detail.blocks.firstOrNull {
             it.blockIndex == blockIndex && it.startEpochMillis == expectedStart
         } ?: return Result.success()
+        val now = System.currentTimeMillis()
+        if (database.isRescheduleRequested(captureId)) return Result.success()
+        val deliveryStore = applicationContext.getSharedPreferences("execution_deliveries", Context.MODE_PRIVATE)
+        val deliveryKey = "$captureId-$blockIndex-$phase"
+        if (!ReminderPolicy.shouldDeliver(now, expectedStart, currentBlock.endEpochMillis, phase == PHASE_PREPARE,
+                deliveryStore.getLong(deliveryKey, -1), inputData.getBoolean("snoozed", false))) return Result.success()
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
                 applicationContext, Manifest.permission.POST_NOTIFICATIONS,
             ) != PackageManager.PERMISSION_GRANTED
         ) return Result.success()
 
         createChannel()
+        if (applicationContext.getSystemService(NotificationManager::class.java)
+                .getNotificationChannel(CHANNEL_ID)?.importance == NotificationManager.IMPORTANCE_NONE) return Result.success()
         val contentIntent = PendingIntent.getActivity(
             applicationContext,
             notificationId(captureId, blockIndex),
@@ -48,13 +56,17 @@ class ExecutionReminderWorker(context: Context, params: WorkerParameters) : Work
             .setStyle(NotificationCompat.BigTextStyle().bigText(detail.actionTitle))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setTimeoutAfter((currentBlock.endEpochMillis - now).coerceAtLeast(1))
             .setAutoCancel(true)
             .setContentIntent(contentIntent)
             .addAction(0, "完了", action(captureId, blockIndex, expectedStart, ExecutionActionReceiver.ACTION_COMPLETE, 1))
             .addAction(0, "15分後", action(captureId, blockIndex, expectedStart, ExecutionActionReceiver.ACTION_SNOOZE, 2))
             .addAction(0, "再配置", action(captureId, blockIndex, expectedStart, ExecutionActionReceiver.ACTION_REPLAN, 3))
             .build()
-        NotificationManagerCompat.from(applicationContext).notify(notificationId(captureId, blockIndex), notification)
+        if (!NotificationManagerCompat.from(applicationContext).areNotificationsEnabled()) return Result.success()
+        NotificationManagerCompat.from(applicationContext).notify(ExecutionReminderScheduler.tag(captureId), notificationId(captureId, blockIndex), notification)
+        deliveryStore.edit().putLong(deliveryKey, expectedStart).apply()
         return Result.success()
     }
 

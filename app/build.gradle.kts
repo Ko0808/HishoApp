@@ -11,8 +11,8 @@ android {
         applicationId = "app.hisho"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
-        versionName = "0.29.0"
+        versionCode = 32
+        versionName = "0.30.0"
 
         buildConfigField(
             "String",

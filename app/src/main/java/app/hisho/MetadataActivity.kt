@@ -157,6 +157,8 @@ class MetadataActivity : Activity() {
             card.addView(TextView(this).apply {
                 text = item.actionTitle.ifBlank { "タイトル未保存" }
                 textSize = 20f
+                maxLines = 3
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(0, 8.dp, 0, 4.dp)
             })
             card.addView(TextView(this).apply {
@@ -322,6 +324,8 @@ class MetadataActivity : Activity() {
                 detail.blocks.forEach { block ->
                     append("\n${block.blockIndex}. ${formatDateTime(block.startEpochMillis)}")
                     append(" 〜 ${formatDateTime(block.endEpochMillis)}")
+                    append("\n配置理由: " + app.hisho.scheduling.ScheduleExplanationStore(this@MetadataActivity)
+                        .read(block.calendarEventId, block.startEpochMillis, block.endEpochMillis))
                 }
             }
             if (detail.lastErrorCode != null) append(errorDescription(detail.lastErrorCode))

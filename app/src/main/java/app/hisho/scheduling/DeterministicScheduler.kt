@@ -23,6 +23,19 @@ class DeterministicScheduler(
     data class Slot(val start: Instant, val end: Instant)
     data class WorkingWindow(val start: LocalTime, val end: LocalTime)
 
+    fun explanation(slot: Slot, deadline: Instant?): String = buildString {
+        val window = dailyWindows?.get(slot.start.atZone(zoneId).dayOfWeek)
+            ?: WorkingWindow(allowedStart, allowedEnd)
+        append("作成時の稼働枠${window.start}〜${window.end}（${zoneId.id}）内で、既存予定")
+        if (breakStart != null && breakEnd != null) append("と休憩${breakStart}〜${breakEnd}")
+        append("を避け、${Duration.between(slot.start, slot.end).toMinutes()}分が収まる最初の空き枠を選びました。")
+        append("予定間の余白は${bufferMinutes}分、1日の上限は${dailyCapacityMinutes}分（既存予定・休憩を含む）です。")
+        append(" AIを利用していても、最終的な時刻は端末内のルールで決定します。")
+        append(if (deadline == null) " 期限は指定されていません。"
+            else if (slot.end.isAfter(deadline)) " この枠は期限を超えています。期限または工数を見直してください。"
+            else " この枠は指定期限までに終了します。")
+    }
+
     fun findSlot(
         now: Instant,
         durationMinutes: Int,

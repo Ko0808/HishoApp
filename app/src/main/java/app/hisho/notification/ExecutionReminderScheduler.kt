@@ -1,6 +1,7 @@
 package app.hisho.notification
 
 import android.content.Context
+import android.app.NotificationManager
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -23,11 +24,16 @@ object ExecutionReminderScheduler {
             WorkManager.getInstance(context), captureId, blockIndex, expectedStart,
             ExecutionReminderWorker.PHASE_START,
             System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(15),
+            replace = true,
         )
     }
 
     fun cancel(context: Context, captureId: Long) {
         WorkManager.getInstance(context).cancelAllWorkByTag(tag(captureId))
+        val notifications = context.getSystemService(NotificationManager::class.java)
+        notifications.activeNotifications.filter { it.tag == tag(captureId) }.forEach {
+            notifications.cancel(it.tag, it.id)
+        }
     }
 
     fun restoreUpcoming(context: Context) {
@@ -43,6 +49,7 @@ object ExecutionReminderScheduler {
         expectedStart: Long,
         phase: String,
         triggerAt: Long,
+        replace: Boolean = false,
     ) {
         if (phase == ExecutionReminderWorker.PHASE_PREPARE && triggerAt <= System.currentTimeMillis()) return
         val data = Data.Builder()
@@ -50,16 +57,16 @@ object ExecutionReminderScheduler {
             .putInt(ExecutionReminderWorker.KEY_BLOCK_INDEX, blockIndex)
             .putLong(ExecutionReminderWorker.KEY_EXPECTED_START, expectedStart)
             .putString(ExecutionReminderWorker.KEY_PHASE, phase)
+            .putBoolean("snoozed", replace)
             .build()
         val request = OneTimeWorkRequestBuilder<ExecutionReminderWorker>()
             .setInputData(data)
             .setInitialDelay((triggerAt - System.currentTimeMillis()).coerceAtLeast(0), TimeUnit.MILLISECONDS)
             .addTag(tag(captureId))
             .build()
-        manager.enqueueUniqueWork(workName(captureId, blockIndex, phase), ExistingWorkPolicy.REPLACE, request)
+        manager.enqueueUniqueWork(ReminderPolicy.workName(captureId, blockIndex, phase, expectedStart),
+            if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, request)
     }
 
-    private fun tag(captureId: Long) = "execution-reminder-task-$captureId"
-    private fun workName(captureId: Long, blockIndex: Int, phase: String) =
-        "execution-reminder-$captureId-$blockIndex-$phase"
+    fun tag(captureId: Long) = "execution-reminder-task-$captureId"
 }

@@ -4,7 +4,7 @@ Android通知から行動候補を抽出し、Google TasksとGoogle Calendarへ�
 
 A local-first Android task scheduler that turns notifications into actionable Google Tasks and schedules them in available Google Calendar time blocks.
 
-**Current version / 現在のバージョン:** `0.29.0` (`versionCode 31`)
+**Current version / 現在のバージョン:** `0.30.0` (`versionCode 32`)
 
 ---
 
@@ -26,6 +26,14 @@ HishoはGmail、Slack、Discord、LINEの通知を取得し、次の処理を行
 
 ### 実装済みの機能
 
+- タイトルだけのクイック追加、Enter／完了キーで保存、任意項目の折りたたみ、入力途中の画面回転への対応
+- Androidのテキスト共有から下書きを作成（自動保存しない）
+- 確認付きの端末音声入力と、非対応端末でのキーボード入力への案内
+- 通知アクセス → Google接続 → 稼働時間 → 実行通知 → 自動再配置の初期設定ガイド
+- 自動再配置の明示選択、Googleと任意AIのデータ送信範囲の説明、Google再接続の導線
+- 新規Calendar枠の配置理由を作成時に記録し、詳細画面に表示（旧予定・手動移動は理由不明を明示）
+- 通知復元でスヌーズを維持し、通知済み・終了済み・再配置待ちの枠の不要な通知を抑制
+- ホームの「次にやること」に進行中の枠と分割タスクの次の枠を反映
 - 対応が必要なタスクを初期表示する確認Inbox（期限注意・未同期・再配置の確認）
 - 表示対象を直接選ぶフィルターと、編集をまとめた「詳細・操作」メニュー
 
@@ -141,6 +149,10 @@ AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を�
 
 ### 既知の制限
 
+- 実行通知はWorkManagerを利用するため時刻厳守ではなく、省電力などで遅れる場合があります。終了済みの枠は通知しません。
+- 「15分後」は通知だけの延期です。延期先が作業枠の終了後なら再通知しません。Calendarを変える場合は「再配置」を使います。
+- 音声入力は端末の認識サービスを使います。オフライン優先を要求しますが、サービスによって外部送信される可能性があるため、利用前に確認します（[Android仕様](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_PREFER_OFFLINE)）。
+- 自動テストに加え、通知到着・スヌーズ・Google連携操作・音声認識・省電力時の実機検証が必要です。チェック項目は[検証手順](docs/ux-validation.md)を参照してください。
 - 個人端末向け検証版で、本番署名とGoogle Play向けOAuth審査は未対応です。
 - OAuth同意画面がテスト公開の場合、再認証が必要になることがあります。
 - 旧バージョンの予定へ現在の設定は遡及適用されません。
@@ -154,7 +166,7 @@ AI支援は初期状態でOFFです。「AI支援を設定」で送信項目を�
 ### 今後の計画
 
 1. 祝日と希望時間帯
-2. Android共有メニューと音声入力
+2. 共有・音声・初期設定・実行通知の継続的な実機検証
 3. アカウント切断、OAuth権限取り消し、データ削除
 4. DB移行、API、オフライン、大量通知、バッテリー試験
 5. 本番署名、プライバシーポリシー、Google Play公開対応
@@ -180,6 +192,14 @@ Notification content is not currently sent to an external AI service.
 
 ### Implemented features
 
+- Title-only quick capture, Enter/Done to save, collapsed optional fields, and draft preservation across rotation
+- Android text sharing into an editable draft, without automatic saving
+- Consent-first system voice input, with keyboard fallback when unavailable
+- Guided setup: notification access → Google → work hours → reminders → recovery choice
+- Explicit recovery choice, Google/optional-AI data explanations, and Google reconnection
+- Per-block placement explanations recorded at creation; unknown legacy or externally moved reasons are stated explicitly
+- Reminder restoration preserves snoozes and suppresses already-delivered, expired, or replan-pending reminders
+- Home shows the current or next tracked block, including split tasks
 - An attention-first review inbox for deadline risk, pending sync, and recovery issues
 - Direct filter selection and a compact details/actions menu instead of per-card editing controls
 
@@ -294,6 +314,10 @@ AI assistance is off by default. It is enabled only after reviewing the transmit
 
 ### Known limitations
 
+- WorkManager reminders are not exact alarms and may be delayed by power management. Expired blocks are not notified.
+- Snooze postpones only the reminder, not the Calendar block. A snooze beyond the block end is suppressed; use replan to change the schedule.
+- Voice input uses the device recognition service. Offline preference is requested but is not guaranteed; a consent dialog warns about possible external processing ([Android reference](https://developer.android.com/reference/android/speech/RecognizerIntent#EXTRA_PREFER_OFFLINE)).
+- Device validation is still required for notification arrival/actions, Google integration, speech recognition, and power-saving behavior; see the [validation checklist](docs/ux-validation.md).
 - This is a personal-device validation build; production signing and Google Play OAuth review are incomplete.
 - Testing-mode OAuth may require reauthorization.
 - Current preferences are not applied retroactively to old events.
@@ -307,7 +331,7 @@ AI assistance is off by default. It is enabled only after reviewing the transmit
 ### Roadmap
 
 1. Add public holidays and preferred time windows.
-2. Add Android sharing and voice capture.
+2. Continue device validation of sharing, voice, onboarding, and reminders.
 3. Add account disconnect, OAuth revocation, and data-deletion controls.
 4. Expand migration, API, offline, load, and battery testing.
 5. Add production signing, privacy documentation, and Google Play release readiness.

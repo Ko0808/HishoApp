@@ -18,6 +18,9 @@ class ExecutionActionReceiver : BroadcastReceiver() {
         val blockIndex = intent.getIntExtra(ExecutionReminderWorker.KEY_BLOCK_INDEX, -1)
         val expectedStart = intent.getLongExtra(ExecutionReminderWorker.KEY_EXPECTED_START, -1)
         if (captureId < 0 || blockIndex < 1) return
+        val detail = CaptureQueueDatabase(context).taskDetail(captureId) ?: return
+        if (detail.state != "SYNCED" || CaptureQueueDatabase(context).isRescheduleRequested(captureId) ||
+            detail.blocks.none { it.blockIndex == blockIndex && it.startEpochMillis == expectedStart }) return
         when (intent.action) {
             ACTION_COMPLETE -> {
                 CaptureQueueDatabase(context).requestCompletion(captureId)
@@ -31,7 +34,7 @@ class ExecutionActionReceiver : BroadcastReceiver() {
                 enqueueSync(context)
             }
         }
-        NotificationManagerCompat.from(context).cancel(ExecutionReminderWorker.notificationId(captureId, blockIndex))
+        NotificationManagerCompat.from(context).cancel(ExecutionReminderScheduler.tag(captureId), ExecutionReminderWorker.notificationId(captureId, blockIndex))
     }
 
     private fun enqueueSync(context: Context) {

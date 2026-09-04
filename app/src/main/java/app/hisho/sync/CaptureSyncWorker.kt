@@ -13,6 +13,7 @@ import app.hisho.notification.ExecutionReminderScheduler
 import app.hisho.scheduling.DeterministicScheduler
 import app.hisho.scheduling.SchedulingPreferences
 import app.hisho.scheduling.TaskBlockPlanner
+import app.hisho.scheduling.ScheduleExplanationStore
 import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
@@ -114,6 +115,10 @@ class CaptureSyncWorker(
     ) {
         database.calendarBlocksToCheck().forEach { block ->
             val event = calendarApi.getEventOrNull(block.calendarEventId)
+            val previous = database.calendarBlocks(block.captureId).firstOrNull { it.calendarEventId == block.calendarEventId }
+            if (event == null || previous == null || previous.startEpochMillis != event.start.toEpochMilli() || previous.endEpochMillis != event.end.toEpochMilli()) {
+                ExecutionReminderScheduler.cancel(applicationContext, block.captureId)
+            }
             if (event == null) database.markCalendarBlockMissing(block.captureId, block.calendarEventId)
             else database.updateCalendarBlock(
                 block.captureId,
@@ -330,7 +335,10 @@ class CaptureSyncWorker(
             deadline = deadlineEpochMillis?.let(Instant::ofEpochMilli),
             busy = busy,
         ) ?: throw IOException("No schedulable Calendar slot")
-        return calendarApi.createEvent(captureId, googleTaskId, title, slot, zoneId)
+        return calendarApi.createEvent(captureId, googleTaskId, title, slot, zoneId).also { event ->
+            ScheduleExplanationStore(applicationContext).save(event.id, event.start.toEpochMilli(), event.end.toEpochMilli(),
+                scheduler.explanation(slot, deadlineEpochMillis?.let(Instant::ofEpochMilli)))
+        }
     }
 
     companion object {
