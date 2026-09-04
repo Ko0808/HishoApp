@@ -9,9 +9,17 @@ import java.net.URL
 class SmartNotificationFilter(context: Context) {
     private val preferences = AiPreferences(context)
     data class Decision(val verdict: String, val title: String, val reason: String)
+    private class DiagnosticFailure(val safeReason: String) : Exception()
+    private fun record(status: String) {
+        preferences.lastStatus = "${java.text.SimpleDateFormat("MM/dd HH:mm:ss", java.util.Locale.JAPAN).format(java.util.Date())} $status"
+    }
     fun classify(source: String, title: String, body: String): Decision {
-        if (!preferences.filterReady()) return Decision("review", "", "AI未設定・本文送信の同意が必要")
+        if (!preferences.filterReady()) {
+            record("未実行: キーを読み取れない、または本文送信への同意がありません")
+            return Decision("review", "", "AI未設定・本文送信の同意が必要")
+        }
         if (title.length + body.length > 12000) return Decision("review", "", "長い通知のため手動確認が必要")
+        record("判定中")
         return runCatching {
             val schema = JSONObject().put("type", "object").put("additionalProperties", false)
                 .put("properties", JSONObject()
@@ -29,9 +37,19 @@ class SmartNotificationFilter(context: Context) {
                 connection.setRequestProperty("Authorization", "Bearer ${preferences.apiKey() ?: error("Missing key")}")
                 connection.setRequestProperty("Content-Type", "application/json")
                 connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
-                check(connection.responseCode in 200..299)
+                val httpStatus = connection.responseCode
+                if (httpStatus !in 200..299) {
+                    val code = runCatching {
+                        val raw = connection.errorStream?.bufferedReader()?.use { it.readText().take(16000) }
+                        raw?.let { JSONObject(it).optJSONObject("error")?.optString("code") }
+                    }.getOrNull()
+                    throw DiagnosticFailure(AiFailure.http(httpStatus, code))
+                }
                 val response = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-                check(response.optString("status") == "completed")
+                if (response.optString("status") != "completed") {
+                    val exhausted = response.optJSONObject("incomplete_details")?.optString("reason") == "max_output_tokens"
+                    throw DiagnosticFailure(if (exhausted) "応答未完了: 出力トークン上限" else "応答が完了していません")
+                }
                 val output = response.getJSONArray("output")
                 for (i in 0 until output.length()) {
                     val content = output.getJSONObject(i).optJSONArray("content") ?: continue
@@ -43,11 +61,23 @@ class SmartNotificationFilter(context: Context) {
                         val actionTitle = result.getString("title").trim()
                         require(verdict in setOf("task", "ignore", "review"))
                         require(verdict != "task" || (actionTitle.isNotBlank() && actionTitle.length <= 60))
-                        return Decision(verdict, actionTitle, result.getString("reason").take(160))
+                        val reason = result.getString("reason").take(160)
+                        record("判定成功: $verdict")
+                        return Decision(verdict, actionTitle, reason)
                     }
                 }
                 error("No decision")
             } finally { connection.disconnect() }
-        }.getOrElse { Decision("review", "", "AI応答を確認できませんでした。手動確認または再判定してください") }
+        }.getOrElse {
+            val safe = when (it) {
+                is DiagnosticFailure -> it.safeReason
+                is java.net.SocketTimeoutException -> "通信タイムアウト"
+                is javax.net.ssl.SSLException -> "TLS接続エラー"
+                is java.io.IOException -> "ネットワーク接続エラー"
+                else -> "応答形式エラー"
+            }
+            record("失敗: $safe")
+            Decision("review", "", "AI失敗: $safe")
+        }
     }
 }

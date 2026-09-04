@@ -14,6 +14,24 @@ import android.widget.Toast
 import app.hisho.ai.AiPreferences
 
 class AiSettingsActivity : app.hisho.ui.GlassActivity() {
+    private var statusView: TextView? = null
+    private val statusListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "last_status") runOnUiThread {
+            statusView?.text = "状態: ${AiPreferences(this).lastStatus}"
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        getSharedPreferences("ai_scheduling", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(statusListener)
+        statusView?.text = "状態: ${AiPreferences(this).lastStatus}"
+    }
+
+    override fun onStop() {
+        getSharedPreferences("ai_scheduling", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(statusListener)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val preferences = AiPreferences(this)
@@ -45,6 +63,30 @@ class AiSettingsActivity : app.hisho.ui.GlassActivity() {
             setPadding(0, 8.dp, 0, 8.dp)
         }
         root.addView(status)
+        statusView = status
+        root.addView(Button(this).apply {
+            text = "架空の通知でAI接続をテスト"
+            setOnClickListener {
+                android.app.AlertDialog.Builder(this@AiSettingsActivity)
+                    .setTitle("AI接続テスト")
+                    .setMessage("保存済みの設定で架空の通知を1件送信します。少額のAPI利用料が発生する場合があります。実通知は送信せず、Google Tasksにも登録しません。設定を変更した場合は先に保存してください。")
+                    .setNegativeButton("キャンセル", null)
+                    .setPositiveButton("テストする") { _, _ ->
+                        isEnabled = false
+                        status.text = "接続テスト中…"
+                        val appContext = applicationContext
+                        Thread {
+                            app.hisho.ai.SmartNotificationFilter(appContext).classify("app.hisho.test", "資料確認のお願い", "あなたに依頼します。添付資料を確認し、修正点を返信してください。")
+                            runOnUiThread {
+                                if (!isDestroyed) {
+                                    status.text = "状態: ${preferences.lastStatus}"
+                                    isEnabled = true
+                                }
+                            }
+                        }.start()
+                    }.show()
+            }
+        }, matchWidth())
         root.addView(Button(this).apply {
             text = "設定を保存"
             setOnClickListener {

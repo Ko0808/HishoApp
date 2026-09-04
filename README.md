@@ -1,6 +1,10 @@
 # Hisho / 秘書
 
-**Version: 0.32.0 (34)** — Personal use only / 個人利用専用
+**Version: 0.32.1 (35)** — Personal use only / 個人利用専用
+
+0.32.1: AIの最終実行時刻・成功／失敗を表示し、HTTPエラー・通信・応答形式を区別します。AI設定の「架空の通知でAI接続をテスト」は保存済み設定で1件を判定し、Google Tasksには登録しません（API利用料が発生する場合があります）。確認待ちは「今すぐ同期」では再判定されず、各項目の「ルール・AIで再判定」が必要です。
+
+0.32.1: Shows timestamped AI outcomes and distinguishes HTTP, network, and response-format failures. The synthetic-notification connection test uses saved settings, may incur API charges, and never creates a Google task. Review items require explicit reclassification; Sync now does not retry them.
 
 0.32.0はページ構造と処理を維持したUI刷新です。Liquid Glassを参考に、淡い背景・半透明カード・角丸の操作面・押下アニメーション・入力フォーカス・安全領域対応を共通化しました。iOSの実装やライブぼかしではなく、Androidの軽量な描画を利用しています。
 
